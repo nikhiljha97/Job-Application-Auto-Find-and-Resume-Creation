@@ -26,19 +26,35 @@
   "max_pages": 6,
   "page_size": 25,
   "min_score": 6.0,
-  "max_resumes_per_run": 25,
+  "max_resumes_per_run": 80,
   "hourly_interval_minutes": 60,
   "launch_schedule": {
     "mode": "daily_times",
     "run_at_load": false,
-    "times": ["08:00", "10:00", "14:00", "18:00", "22:00"]
+    "times": [
+      "08:00",
+      "10:00",
+      "14:00",
+      "18:00",
+      "22:00"
+    ]
   },
   "notify_only_new_jobs": true,
   "notification_top_n": 10,
   "notifications": {
-    "telegram": {"enabled": false, "send_excel": true},
-    "email": {"enabled": false, "send_excel": true, "smtp_port": 587, "use_tls": true},
-    "whatsapp_twilio": {"enabled": false}
+    "telegram": {
+      "enabled": false,
+      "send_excel": true
+    },
+    "email": {
+      "enabled": false,
+      "send_excel": true,
+      "smtp_port": 587,
+      "use_tls": true
+    },
+    "whatsapp_twilio": {
+      "enabled": false
+    }
   },
   "google_sheets": {
     "enabled": false,
@@ -67,10 +83,21 @@
     "excel_file_name": "linkedin_job_results.xlsx",
     "create_sharing_links": true,
     "sharing_scope": "anonymous",
-    "scopes": ["Files.ReadWrite", "User.Read"]
+    "scopes": [
+      "Files.ReadWrite",
+      "User.Read"
+    ]
   },
   "headless": false,
-  "target_locations": ["Toronto", "Mississauga", "Hamilton", "Ontario", "Canada", "Remote", "Hybrid"],
+  "target_locations": [
+    "Toronto",
+    "Mississauga",
+    "Hamilton",
+    "Ontario",
+    "Canada",
+    "Remote",
+    "Hybrid"
+  ],
   "target_role_keywords": [
     "strategy",
     "strategic",
@@ -85,13 +112,25 @@
     "market research",
     "operations"
   ],
-  "seniority_keywords_to_penalize": ["director", "vp", "vice president", "head of", "principal", "staff"],
+  "seniority_keywords_to_penalize": [
+    "director",
+    "vp",
+    "vice president",
+    "head of",
+    "principal",
+    "staff"
+  ],
   "preferred_resume_templates": [
     "MASTER FOLDER - RESUME TEMPLATES/Data Analyst.docx",
     "MASTER FOLDER - RESUME TEMPLATES/RESUME_NIKHIL.docx",
     "Nikhil_Jha_Resume_General_AIAnalytics.docx"
   ],
   "generation_resume_template": "Carsleberg - Category Insights Manager/NikhilJha_Resume_Category Insights Manager.docx",
-  "exclude_resume_name_terms": ["coverletter", "cover letter", "statement of purpose", "~$"],
+  "exclude_resume_name_terms": [
+    "coverletter",
+    "cover letter",
+    "statement of purpose",
+    "~$"
+  ],
   "candidate_experience_years": 3.9
 }
