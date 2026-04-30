@@ -195,6 +195,16 @@ When you mark a row as `Applied`, the next run:
 
 This gives the scanner a conservative feedback loop: only resumes you actually used become future source material.
 
+## If The OneDrive Excel Is Open
+
+If `linkedin_job_results.xlsx` is open in Excel or OneDrive when a scheduled run finishes, Microsoft Graph may lock the workbook. The scanner still completes the scan, writes the updated local Excel, and uploads a timestamped backup copy such as:
+
+```text
+linkedin_job_results_backup_20260430_101530.xlsx
+```
+
+Close the open workbook before the next run if you want the main `linkedin_job_results.xlsx` file to be replaced directly.
+
 ## Google Integrations
 
 Google support is kept in the repo but disabled by default:

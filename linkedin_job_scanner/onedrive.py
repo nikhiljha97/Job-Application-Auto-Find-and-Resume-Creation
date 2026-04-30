@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -91,8 +92,19 @@ def upload_excel_to_onedrive(config: dict[str, Any], excel_path: str | Path) -> 
         )
     except RuntimeError as exc:
         if "423" in str(exc) or "resourceLocked" in str(exc):
-            print("OneDrive Excel upload skipped because the workbook is currently locked/open.")
-            return "", ""
+            backup_name = _locked_excel_backup_name(path)
+            print(
+                "OneDrive Excel workbook is locked/open; uploading this run's results "
+                f"as backup copy: {backup_name}"
+            )
+            backup_item = _upload_file_to_folder(
+                config,
+                folder_id,
+                backup_name,
+                path,
+                XLSX_MIME,
+            )
+            return str(backup_item.get("id", "")), _sharing_or_web_url(config, backup_item)
         raise
     return str(item.get("id", "")), _sharing_or_web_url(config, item)
 
@@ -244,6 +256,11 @@ def _upload_file_to_folder(config: dict[str, Any], folder_id: str, filename: str
         headers={"Content-Type": mime_type},
     )
     return response.json()
+
+
+def _locked_excel_backup_name(path: Path) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{path.stem}_backup_{timestamp}{path.suffix}"
 
 
 def _sharing_or_web_url(config: dict[str, Any], item: dict[str, Any]) -> str:
