@@ -4,6 +4,7 @@
   "apply_filters_by_url": true,
   "linkedin_start_url": "https://www.linkedin.com/jobs/",
   "search_query": "strategy OR insight OR insights OR Analyst",
+  "linkedin_location": "Canada",
   "wait_seconds_after_action": 10,
   "date_posted": "Past 24 hours",
   "employment_types": [

@@ -10,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "search_url": "",
+    "search_query": "strategy OR insight OR insights OR Analyst",
+    "linkedin_location": "Canada",
     "resume_root": "..",
     "output_dir": "outputs",
     "linkedin_profile_dir": ".linkedin_profile",

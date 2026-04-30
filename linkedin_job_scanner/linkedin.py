@@ -219,6 +219,7 @@ class LinkedInScanner:
         wait_ms = int(float(self.config.get("wait_seconds_after_action", 10)) * 1000)
         start_url = str(self.config.get("linkedin_start_url", "https://www.linkedin.com/jobs/"))
         search_query = str(self.config.get("search_query", "strategy OR insight OR insights OR Analyst"))
+        location = str(self.config.get("linkedin_location", "Canada")).strip()
         print(f"Opening LinkedIn Jobs: {start_url}")
         self._safe_goto(page, start_url, timeout=30_000)
         self._wait_for_login_if_needed(page, headless=headless)
@@ -226,6 +227,9 @@ class LinkedInScanner:
 
         print(f"Searching LinkedIn for: {search_query}")
         self._fill_search_box(page, search_query)
+        if location:
+            print(f"Setting LinkedIn location to: {location}")
+            self._fill_location_box(page, location)
         page.keyboard.press("Enter")
         page.wait_for_timeout(wait_ms)
         if bool(self.config.get("apply_filters_by_url", True)):
@@ -235,7 +239,7 @@ class LinkedInScanner:
             return
 
         if not self._has_filter_button(page, "Date posted"):
-            self._safe_goto(page, build_search_url(search_query), timeout=30_000)
+            self._safe_goto(page, build_search_url(search_query, location), timeout=30_000)
             page.wait_for_timeout(wait_ms)
 
         date_posted = self.config.get("date_posted")
@@ -322,6 +326,61 @@ class LinkedInScanner:
         except Exception:
             pass
         raise RuntimeError("Could not find LinkedIn job search box.")
+
+    def _fill_location_box(self, page: Any, location: str) -> None:
+        selectors = [
+            "input[placeholder*='City, state, or zip code']",
+            "input[aria-label*='City, state, or zip code']",
+            "input[placeholder*='Location']",
+            "input[aria-label*='Location']",
+            "input[name='location']",
+        ]
+        for selector in selectors:
+            locator = page.locator(selector).first
+            try:
+                if locator.count():
+                    locator.click(timeout=5_000)
+                    page.keyboard.press("Meta+A")
+                    page.keyboard.press("Control+A")
+                    locator.fill(location)
+                    return
+            except Exception:
+                continue
+        try:
+            filled = page.evaluate(
+                """
+                (location) => {
+                  const inputs = Array.from(document.querySelectorAll('input, textarea, [contenteditable="true"]'));
+                  const target = inputs.find((el) => {
+                    const haystack = [
+                      el.getAttribute('placeholder') || '',
+                      el.getAttribute('aria-label') || '',
+                      el.getAttribute('name') || '',
+                      el.innerText || '',
+                      el.value || ''
+                    ].join(' ').toLowerCase();
+                    const visible = !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+                    return visible && /(city, state, or zip code|location)/i.test(haystack);
+                  });
+                  if (!target) return false;
+                  target.focus();
+                  if (target.isContentEditable) {
+                    target.innerText = location;
+                  } else {
+                    target.value = location;
+                  }
+                  target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: location }));
+                  target.dispatchEvent(new Event('change', { bubbles: true }));
+                  return true;
+                }
+                """,
+                location,
+            )
+            if filled:
+                return
+        except Exception:
+            pass
+        print("Could not find LinkedIn location box; continuing with URL location filter.")
 
     def _apply_filter(self, page: Any, filter_name: str, option_names: list[str], wait_ms: int) -> None:
         self._click_filter_button(page, filter_name)
@@ -429,12 +488,15 @@ def normalize_search_url(url: str) -> str:
     return url
 
 
-def build_search_url(query: str) -> str:
+def build_search_url(query: str, location: str = "") -> str:
+    params = {
+        "keywords": query,
+        "origin": "JOB_SEARCH_PAGE_SEARCH_BUTTON",
+    }
+    if location:
+        params["location"] = location
     return "https://www.linkedin.com/jobs/search/?" + urlencode(
-        {
-            "keywords": query,
-            "origin": "JOB_SEARCH_PAGE_SEARCH_BUTTON",
-        }
+        params
     )
 
 
@@ -443,6 +505,9 @@ def build_filtered_search_url(query: str, config: dict[str, Any]) -> str:
         "keywords": query,
         "origin": "JOB_SEARCH_PAGE_SEARCH_BUTTON",
     }
+    location = str(config.get("linkedin_location", "Canada")).strip()
+    if location:
+        params["location"] = location
     if str(config.get("date_posted", "")).lower() == "past 24 hours":
         params["f_TPR"] = "r86400"
 
