@@ -34,6 +34,63 @@ SUMMARY_DISPLAY_TERMS = set(DEFAULT_SKILL_PHRASES) | {
     "syndicated data",
 }
 SUMMARY_BLOCKED_TERMS = {"r", "client", "partner", "senior", "manager", "associate"}
+CORE_POSITIONING_TITLE = "Category & Shopper Strategy / Business Analysis & Insights"
+CORE_POSITIONING_SUMMARY = (
+    "Category & Shopper Strategy / Business Analysis & Insights professional with an MBA in Finance from "
+    "McMaster University and 4+ years of analytics experience across FMCG/CPG, retail media, financial "
+    "services, telecom, and technology. At Loblaw Advance, supported Confectionery and Beauty category "
+    "insights for Tier 1 CPG clients including Hershey, Lindt, Mondelez, L'Oreal, Nestle, and Ferrero on "
+    "Canada's 41M+ member PC Optimum loyalty platform."
+)
+CORE_POSITIONING_IMPACT = (
+    "Experienced translating NielsenIQ/Nielsen RMC, POS, panel, campaign, loyalty, and behavioral data into "
+    "category growth strategies, shopper insights, assortment recommendations, pricing and promotions analysis, "
+    "executive storytelling, KPI dashboards, and scalable analytics workflows. Proven impact includes $24M+ in "
+    "category growth opportunities, $15M in retention opportunities, $9M in organic growth potential, 40%+ "
+    "faster decision-making, $38M in revenue protected, 95% manual effort reduction, and 26% analytics adoption uplift."
+)
+FOUNDATIONAL_COMPETENCIES = {
+    "Category, Shopper & Market Insights": [
+        "category management",
+        "category insights",
+        "shopper insights",
+        "consumer insights",
+        "market share analysis",
+        "competitive analysis",
+        "retail analytics",
+        "marketing analytics",
+    ],
+    "Analytics, BI & Modelling": [
+        "sql",
+        "python",
+        "power bi",
+        "tableau",
+        "looker studio",
+        "forecasting",
+        "segmentation",
+        "a/b testing",
+    ],
+    "Strategy, Stakeholders & Delivery": [
+        "strategy",
+        "business intelligence",
+        "executive reporting",
+        "stakeholder management",
+        "cross-functional collaboration",
+        "kpi reporting",
+        "process automation",
+        "agile",
+    ],
+    "AI, Automation & Advanced Analytics": [
+        "ai-powered analytics",
+        "ai agent workflows",
+        "machine learning",
+        "predictive analytics",
+        "statistical modelling",
+        "nlp",
+        "etl",
+        "financial modelling",
+    ],
+}
 
 
 def create_tailored_resume(
@@ -66,7 +123,7 @@ def create_tailored_resume(
     doc = Document(str(output_path))
     supported_keywords = resume_bank.supported_keywords(score.matched_keywords)
     summary_keywords = _summary_display_keywords(supported_keywords, resume_bank.profile_keywords)
-    summary_lines = [_build_summary(job, summary_keywords)]
+    summary_lines = _build_summary(job, summary_keywords)
     competency_lines = _build_competency_lines(supported_keywords, resume_bank.profile_keywords)
 
     _replace_top_headline(doc, job, summary_keywords)
@@ -81,79 +138,34 @@ def create_tailored_resume(
     return str(output_path), resume_text
 
 
-def _build_summary(job: JobPosting, supported_keywords: list[str]) -> str:
+def _build_summary(job: JobPosting, supported_keywords: list[str]) -> list[str]:
     role_terms = ", ".join(_title_skill(term) for term in supported_keywords[:8])
     role_phrase = f" Strengths include {role_terms}." if role_terms else ""
-    return (
-        "Analytics and strategy professional with an MBA from McMaster University and 4+ years of experience "
-        "in business intelligence, consumer analytics, risk analytics, KPI reporting, Python/SQL automation, "
-        "dashboard development, and cross-functional stakeholder management. Experienced translating behavioral, "
-        "operational, and campaign data into executive-ready insights and scalable analytics workflows."
-        f"{role_phrase}"
-    )
+    return [CORE_POSITIONING_SUMMARY, f"{CORE_POSITIONING_IMPACT}{role_phrase}"]
 
 
 def _build_competency_lines(supported_keywords: list[str], profile_keywords: list[str]) -> list[str]:
     allowed = set(DEFAULT_SKILL_PHRASES)
     terms = _unique([term for term in [*supported_keywords, *profile_keywords] if term in allowed])
-    buckets = {
-        "Strategy & Insights": [
-            "strategy",
-            "business intelligence",
-            "consumer insights",
-            "shopper insights",
-            "market research",
-            "category insights",
-            "market share analysis",
-            "executive reporting",
-        ],
-        "Analytics & Modelling": [
-            "data analysis",
-            "predictive analytics",
-            "statistical analysis",
-            "regression analysis",
-            "segmentation",
-            "churn modelling",
-            "a/b testing",
-            "forecasting",
-        ],
-        "Tools & Automation": [
-            "python",
-            "sql",
-            "power bi",
-            "tableau",
-            "looker studio",
-            "excel",
-            "machine learning",
-            "nlp",
-            "etl",
-        ],
-        "Delivery & Stakeholders": [
-            "stakeholder management",
-            "cross-functional collaboration",
-            "agile",
-            "jira",
-            "confluence",
-            "okr",
-            "kpi reporting",
-            "process automation",
-        ],
-    }
     lines: list[str] = []
     used: set[str] = set()
-    for label, desired in buckets.items():
-        matches = [term for term in terms if term in desired and term not in used]
-        if len(matches) < 4:
-            matches.extend(term for term in terms if term not in used and term not in matches)
+
+    jd_terms = [term for term in supported_keywords if term in allowed and term not in SUMMARY_BLOCKED_TERMS][:10]
+    if jd_terms:
+        lines.append("Target Role Alignment: " + " | ".join(_title_skill(term) for term in jd_terms))
+        used.update(jd_terms)
+
+    for label, desired in FOUNDATIONAL_COMPETENCIES.items():
+        matches = [term for term in desired if term not in used]
         matches = matches[:8]
         used.update(matches)
         if matches:
             lines.append(f"{label}: " + " | ".join(_title_skill(term) for term in matches))
 
-    remaining = [term for term in terms if term not in used][:10]
+    remaining = [term for term in terms if term not in used and term not in SUMMARY_BLOCKED_TERMS][:10]
     if remaining:
-        lines.append("JD Keyword Alignment: " + " | ".join(_title_skill(term) for term in remaining))
-    return lines[:5]
+        lines.append("Additional ATS Keywords: " + " | ".join(_title_skill(term) for term in remaining))
+    return lines[:6]
 
 
 def _summary_display_keywords(supported_keywords: list[str], profile_keywords: list[str]) -> list[str]:
@@ -183,11 +195,16 @@ def _replace_top_headline(doc: Any, job: JobPosting, supported_keywords: list[st
 
 
 def _headline_for_job(job: JobPosting, supported_keywords: list[str]) -> str:
-    terms = " | ".join(_title_skill(term) for term in supported_keywords[:4])
-    if terms:
-        return f"Strategy & Analytics | {terms} | MBA Finance & Strategy"
+    headline_terms = [
+        term
+        for term in supported_keywords
+        if term not in {"python", "sql", "power bi", "excel", "tableau", "looker studio"}
+    ][:3]
+    terms = " | ".join(_title_skill(term) for term in headline_terms)
     title = job.title or "Strategy and Analytics"
-    return f"{title} | Business Intelligence | Python, SQL, Power BI | MBA Finance & Strategy"
+    if terms:
+        return f"{title} | {CORE_POSITIONING_TITLE} | {terms} | SQL, Python, Power BI"
+    return f"{title} | {CORE_POSITIONING_TITLE} | SQL, Python, Power BI | MBA Finance"
 
 
 def _replace_section(doc: Any, headings: set[str], lines: list[str], plain: bool = False) -> bool:
@@ -411,16 +428,24 @@ def _trim_trailing_incomplete_role(doc: Any) -> None:
 
 def _title_skill(term: str) -> str:
     overrides = {
-        "sql": "SQL",
+        "ai": "AI",
+        "ai agent workflows": "AI Agent Workflows",
+        "ai-powered analytics": "AI-Powered Analytics",
+        "a/b testing": "A/B Testing",
+        "cpg": "CPG",
+        "etl": "ETL",
+        "fmcg": "FMCG",
+        "jira": "Jira",
+        "kpi reporting": "KPI Reporting",
+        "looker studio": "Looker Studio",
+        "nielseniq": "NielsenIQ",
+        "nlp": "NLP",
+        "okr": "OKR",
+        "pos data analysis": "POS Data Analysis",
+        "power bi": "Power BI",
         "python": "Python",
         "r": "R",
-        "ai": "AI",
-        "nlp": "NLP",
-        "etl": "ETL",
-        "okr": "OKR",
-        "kpi reporting": "KPI Reporting",
-        "a/b testing": "A/B Testing",
-        "power bi": "Power BI",
+        "sql": "SQL",
     }
     return overrides.get(term, term.title())
 

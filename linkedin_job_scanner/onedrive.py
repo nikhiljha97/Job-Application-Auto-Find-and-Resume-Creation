@@ -81,13 +81,19 @@ def upload_excel_to_onedrive(config: dict[str, Any], excel_path: str | Path) -> 
     if not folder_id:
         folder_path = str(onedrive_config.get("excel_folder_path", "")).strip() or str(onedrive_config.get("resume_folder_path", "")).strip()
         folder_id = _ensure_folder_path(config, folder_path) if folder_path else "root"
-    item = _upload_file_to_folder(
-        config,
-        folder_id,
-        path.name,
-        path,
-        XLSX_MIME,
-    )
+    try:
+        item = _upload_file_to_folder(
+            config,
+            folder_id,
+            path.name,
+            path,
+            XLSX_MIME,
+        )
+    except RuntimeError as exc:
+        if "423" in str(exc) or "resourceLocked" in str(exc):
+            print("OneDrive Excel upload skipped because the workbook is currently locked/open.")
+            return "", ""
+        raise
     return str(item.get("id", "")), _sharing_or_web_url(config, item)
 
 

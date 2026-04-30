@@ -41,12 +41,12 @@ Important: real ATS systems usually do not assign a universal 80% or 90% score. 
 
 ## Nikhil Resume Cheat Sheet
 
-Core positioning:
+Core positioning used by the resume generator:
 
 ```text
-Category & Shopper Strategy / Business Analysis & Insights professional with 5+ years in FMCG/CPG analytics.
-Loblaw Advance category insights experience for Hershey, Lindt, Mondelez, L'Oreal and other CPG clients.
-MBA Finance, McMaster. SQL, Python, Power BI, Tableau, NielsenIQ/Nielsen RMC, shopper insights, category analytics.
+Category & Shopper Strategy / Business Analysis & Insights professional with an MBA in Finance from McMaster University and 4+ years of analytics experience across FMCG/CPG, retail media, financial services, telecom, and technology.
+At Loblaw Advance, supported Confectionery and Beauty category insights for Tier 1 CPG clients including Hershey, Lindt, Mondelez, L'Oreal, Nestle, and Ferrero on Canada's 41M+ member PC Optimum loyalty platform.
+NielsenIQ/Nielsen RMC, POS, panel, campaign, loyalty, and behavioral data. SQL, Python, Power BI, Tableau, Looker Studio, category growth strategy, shopper insights, pricing and promotions, assortment, KPI dashboards, and executive storytelling.
 ```
 
 Reusable impact metrics:

@@ -46,8 +46,9 @@ class ResumeBank:
             docx_paths.extend(sorted(_candidate_resume_paths(trusted_root.resolve(), config)))
         signature = {str(path): path.stat().st_mtime for path in docx_paths if path.exists()}
 
+        vocabulary_signature = "|".join(DEFAULT_SKILL_PHRASES)
         cached = _load_cache(cache_path)
-        if cached and cached.get("signature") == signature:
+        if cached and cached.get("signature") == signature and cached.get("vocabulary_signature") == vocabulary_signature:
             docs = [ResumeDocument.from_dict(item) for item in cached.get("documents", [])]
             profile_text = str(cached.get("profile_text", ""))
             keywords = list(cached.get("profile_keywords", []))
@@ -71,6 +72,7 @@ class ResumeBank:
             json.dumps(
                 {
                     "signature": signature,
+                    "vocabulary_signature": vocabulary_signature,
                     "documents": [doc.to_dict() for doc in docs],
                     "profile_text": profile_text,
                     "profile_keywords": keywords,
