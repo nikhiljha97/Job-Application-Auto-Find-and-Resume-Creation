@@ -20,7 +20,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hourly_interval_minutes": 60,
     "headless": False,
     "target_locations": ["Toronto", "Mississauga", "Hamilton", "Ontario", "Canada", "Remote", "Hybrid"],
-    "target_role_keywords": ["strategy", "insights", "analytics", "analyst", "business intelligence"],
+    "target_role_keywords": ["strategy", "insight", "insights", "analytics", "analyst", "business intelligence"],
     "seniority_keywords_to_penalize": ["director", "vp", "vice president", "head of", "principal", "staff"],
     "preferred_resume_templates": [],
     "exclude_resume_name_terms": ["coverletter", "cover letter", "statement of purpose", "~$"],

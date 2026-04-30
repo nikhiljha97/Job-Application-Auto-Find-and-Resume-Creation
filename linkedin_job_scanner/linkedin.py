@@ -218,7 +218,7 @@ class LinkedInScanner:
     def _open_search_with_filters(self, page: Any, headless: bool) -> None:
         wait_ms = int(float(self.config.get("wait_seconds_after_action", 10)) * 1000)
         start_url = str(self.config.get("linkedin_start_url", "https://www.linkedin.com/jobs/"))
-        search_query = str(self.config.get("search_query", "strategy OR Insights OR Analyst"))
+        search_query = str(self.config.get("search_query", "strategy OR insight OR insights OR Analyst"))
         print(f"Opening LinkedIn Jobs: {start_url}")
         self._safe_goto(page, start_url, timeout=30_000)
         self._wait_for_login_if_needed(page, headless=headless)

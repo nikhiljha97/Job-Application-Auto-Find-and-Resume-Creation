@@ -1,9 +1,9 @@
 {
-  "search_url": "https://www.linkedin.com/jobs/search-results/?keywords=strategy%20OR%20insights%20OR%20Analyst",
+  "search_url": "https://www.linkedin.com/jobs/search-results/?keywords=strategy%20OR%20insight%20OR%20insights%20OR%20Analyst",
   "use_linkedin_ui_flow": true,
   "apply_filters_by_url": true,
   "linkedin_start_url": "https://www.linkedin.com/jobs/",
-  "search_query": "strategy OR Insights OR Analyst",
+  "search_query": "strategy OR insight OR insights OR Analyst",
   "wait_seconds_after_action": 10,
   "date_posted": "Past 24 hours",
   "employment_types": [
@@ -101,6 +101,7 @@
   "target_role_keywords": [
     "strategy",
     "strategic",
+    "insight",
     "insights",
     "analytics",
     "analyst",
