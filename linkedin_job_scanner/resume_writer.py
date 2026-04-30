@@ -321,6 +321,7 @@ def _normalize_layout(doc: Any) -> None:
 
     for index, paragraph in enumerate(doc.paragraphs):
         text = paragraph.text.strip()
+        _clear_paragraph_borders(paragraph)
         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
         paragraph.paragraph_format.keep_with_next = False
         paragraph.paragraph_format.keep_together = False
@@ -340,15 +341,18 @@ def _normalize_layout(doc: Any) -> None:
             _format_paragraph_runs(paragraph, "Calibri", 11, bold=True)
             paragraph.paragraph_format.space_before = Pt(6)
             paragraph.paragraph_format.space_after = Pt(3)
+            _apply_heading_borders(paragraph)
         elif paragraph.style and paragraph.style.name == "List Paragraph":
             paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             paragraph.paragraph_format.space_before = Pt(1)
             paragraph.paragraph_format.space_after = Pt(1)
-            _bold_label_prefix(paragraph)
+            _format_paragraph_runs(paragraph, "Calibri", 10)
+            _bold_label_prefix(paragraph, font_size_pt=10)
         elif _looks_like_role_header(text):
+            _format_paragraph_runs(paragraph, "Calibri", 11)
             paragraph.paragraph_format.space_before = Pt(6)
             paragraph.paragraph_format.space_after = Pt(1)
-            _bold_before_separator(paragraph, " | ")
+            _bold_role_designation(paragraph)
         elif text:
             paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             paragraph.paragraph_format.space_before = Pt(1.5)
@@ -358,6 +362,34 @@ def _normalize_layout(doc: Any) -> None:
         text = paragraph.text.strip()
         if is_section_heading(text) or _looks_like_role_header(text) or _looks_like_date_line(text):
             paragraph.paragraph_format.keep_with_next = True
+
+
+def _apply_heading_borders(paragraph: Any) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    _clear_paragraph_borders(paragraph)
+
+    borders = OxmlElement("w:pBdr")
+    for edge in ("top", "bottom"):
+        border = OxmlElement(f"w:{edge}")
+        border.set(qn("w:val"), "single")
+        border.set(qn("w:sz"), "6")
+        border.set(qn("w:space"), "1")
+        border.set(qn("w:color"), "AAAAAA")
+        borders.append(border)
+    p_pr.append(borders)
+
+
+def _clear_paragraph_borders(paragraph: Any) -> None:
+    from docx.oxml.ns import qn
+
+    if paragraph._p.pPr is None:
+        return
+    existing = paragraph._p.pPr.find(qn("w:pBdr"))
+    if existing is not None:
+        paragraph._p.pPr.remove(existing)
 
 
 def _format_paragraph_runs(paragraph: Any, font_name: str, font_size_pt: int | float, bold: bool | None = None) -> None:
@@ -370,7 +402,7 @@ def _format_paragraph_runs(paragraph: Any, font_name: str, font_size_pt: int | f
             run.font.bold = bold
 
 
-def _bold_label_prefix(paragraph: Any) -> None:
+def _bold_label_prefix(paragraph: Any, font_size_pt: int | float = 9) -> None:
     from docx.shared import Pt
 
     text = paragraph.text
@@ -380,11 +412,34 @@ def _bold_label_prefix(paragraph: Any) -> None:
     _clear_paragraph_content(paragraph)
     label = paragraph.add_run(text[: colon + 1])
     label.font.name = "Calibri"
-    label.font.size = Pt(9)
+    label.font.size = Pt(font_size_pt)
     label.bold = True
     body = paragraph.add_run(text[colon + 1 :])
     body.font.name = "Calibri"
-    body.font.size = Pt(9)
+    body.font.size = Pt(font_size_pt)
+
+
+def _bold_role_designation(paragraph: Any) -> None:
+    from docx.shared import Pt
+
+    text = paragraph.text
+    separator = " | " if " | " in text else " – " if " – " in text else ""
+    if not separator:
+        _format_paragraph_runs(paragraph, "Calibri", 11)
+        return
+
+    pos = text.find(separator)
+    if pos <= 0:
+        return
+    _clear_paragraph_content(paragraph)
+    designation = paragraph.add_run(text[:pos])
+    designation.font.name = "Calibri"
+    designation.font.size = Pt(11)
+    designation.bold = True
+    rest = paragraph.add_run(text[pos:])
+    rest.font.name = "Calibri"
+    rest.font.size = Pt(11)
+    rest.bold = False
 
 
 def _bold_before_separator(paragraph: Any, separator: str) -> None:
@@ -451,7 +506,7 @@ def _title_skill(term: str) -> str:
 
 
 def _looks_like_role_header(text: str) -> bool:
-    if len(text) > 130 or len(text) < 12:
+    if len(text) > 260 or len(text) < 12:
         return False
     if ":" in text:
         return False

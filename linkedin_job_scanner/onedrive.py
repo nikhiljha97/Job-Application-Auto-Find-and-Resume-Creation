@@ -56,13 +56,30 @@ def update_onedrive_docx(config: dict[str, Any], item_id: str, docx_path: str | 
     if not item_id or not path.exists() or path.stat().st_size == 0:
         return "", ""
 
-    item = _json_request(
-        config,
-        "PUT",
-        f"{GRAPH_ROOT}/me/drive/items/{item_id}/content",
-        data=path.read_bytes(),
-        headers={"Content-Type": DOCX_MIME},
-    )
+    try:
+        item = _json_request(
+            config,
+            "PUT",
+            f"{GRAPH_ROOT}/me/drive/items/{item_id}/content",
+            data=path.read_bytes(),
+            headers={"Content-Type": DOCX_MIME},
+        )
+    except RuntimeError as exc:
+        if "423" in str(exc) or "resourceLocked" in str(exc):
+            backup_name = _locked_docx_backup_name(path)
+            print(
+                "OneDrive resume file is locked/open; uploading this reformatted resume "
+                f"as replacement copy: {backup_name}"
+            )
+            replacement = _upload_file_to_folder(
+                config,
+                _resume_folder_id(config),
+                backup_name,
+                path,
+                DOCX_MIME,
+            )
+            return str(replacement.get("id", "")), _sharing_or_web_url(config, replacement)
+        raise
     return str(item.get("id", item_id)), _sharing_or_web_url(config, item)
 
 
@@ -261,6 +278,11 @@ def _upload_file_to_folder(config: dict[str, Any], folder_id: str, filename: str
 def _locked_excel_backup_name(path: Path) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"{path.stem}_backup_{timestamp}{path.suffix}"
+
+
+def _locked_docx_backup_name(path: Path) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{path.stem}_replacement_{timestamp}{path.suffix}"
 
 
 def _sharing_or_web_url(config: dict[str, Any], item: dict[str, Any]) -> str:
