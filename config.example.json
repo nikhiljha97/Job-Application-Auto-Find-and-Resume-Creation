@@ -1,0 +1,97 @@
+{
+  "search_url": "https://www.linkedin.com/jobs/search-results/?keywords=strategy%20OR%20insights%20OR%20Analyst",
+  "use_linkedin_ui_flow": true,
+  "apply_filters_by_url": true,
+  "linkedin_start_url": "https://www.linkedin.com/jobs/",
+  "search_query": "strategy OR Insights OR Analyst",
+  "wait_seconds_after_action": 10,
+  "date_posted": "Past 24 hours",
+  "employment_types": [
+    "Full-time",
+    "Part-time",
+    "Contract",
+    "Temporary",
+    "Volunteer",
+    "Other"
+  ],
+  "experience_levels": [
+    "Entry-level",
+    "Manager"
+  ],
+  "resume_root": "..",
+  "trusted_resume_root": "onedrive_source_resumes",
+  "output_dir": "outputs",
+  "env_file": ".env",
+  "linkedin_profile_dir": ".linkedin_profile",
+  "max_pages": 6,
+  "page_size": 25,
+  "min_score": 6.0,
+  "max_resumes_per_run": 25,
+  "hourly_interval_minutes": 60,
+  "launch_schedule": {
+    "mode": "daily_times",
+    "run_at_load": false,
+    "times": ["08:00", "10:00", "14:00", "18:00", "22:00"]
+  },
+  "notify_only_new_jobs": true,
+  "notification_top_n": 10,
+  "notifications": {
+    "telegram": {"enabled": false, "send_excel": true},
+    "email": {"enabled": false, "send_excel": true, "smtp_port": 587, "use_tls": true},
+    "whatsapp_twilio": {"enabled": false}
+  },
+  "google_sheets": {
+    "enabled": false,
+    "spreadsheet_id": "",
+    "worksheet_name": "LinkedIn Jobs",
+    "service_account_json": ""
+  },
+  "google_drive": {
+    "enabled": false,
+    "resume_folder_id": "",
+    "create_google_doc_for_each_resume": true,
+    "auth_mode": "oauth",
+    "oauth_client_json": "",
+    "oauth_token_json": "google_drive_token.json"
+  },
+  "onedrive": {
+    "enabled": true,
+    "client_id": "YOUR_MICROSOFT_APP_CLIENT_ID",
+    "tenant_id": "consumers",
+    "oauth_token_json": "onedrive_token.json",
+    "resume_folder_path": "Job Scan/Resumes",
+    "resume_folder_id": "",
+    "upload_excel": true,
+    "excel_folder_path": "Job Scan",
+    "excel_folder_id": "",
+    "excel_file_name": "linkedin_job_results.xlsx",
+    "create_sharing_links": true,
+    "sharing_scope": "anonymous",
+    "scopes": ["Files.ReadWrite", "User.Read"]
+  },
+  "headless": false,
+  "target_locations": ["Toronto", "Mississauga", "Hamilton", "Ontario", "Canada", "Remote", "Hybrid"],
+  "target_role_keywords": [
+    "strategy",
+    "strategic",
+    "insights",
+    "analytics",
+    "analyst",
+    "business analyst",
+    "data analyst",
+    "business intelligence",
+    "consumer insights",
+    "category insights",
+    "market research",
+    "operations"
+  ],
+  "seniority_keywords_to_penalize": ["director", "vp", "vice president", "head of", "principal", "staff"],
+  "preferred_resume_templates": [
+    "MASTER FOLDER - RESUME TEMPLATES/Data Analyst.docx",
+    "MASTER FOLDER - RESUME TEMPLATES/RESUME_NIKHIL.docx",
+    "Nikhil_Jha_Resume_General_AIAnalytics.docx"
+  ],
+  "generation_resume_template": "Carsleberg - Category Insights Manager/NikhilJha_Resume_Category Insights Manager.docx",
+  "exclude_resume_name_terms": ["coverletter", "cover letter", "statement of purpose", "~$"],
+  "candidate_experience_years": 3.9
+}

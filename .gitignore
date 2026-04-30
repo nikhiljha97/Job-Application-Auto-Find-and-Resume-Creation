@@ -1,0 +1,16 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+.env
+.venv/
+.linkedin_profile/
+
+config.json
+*_token.json
+google_drive_token.json
+onedrive_token.json
+
+outputs/
+google_source_resumes/
+onedrive_source_resumes/
