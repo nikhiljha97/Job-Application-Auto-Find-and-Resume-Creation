@@ -87,7 +87,9 @@
     "scopes": [
       "Files.ReadWrite",
       "User.Read"
-    ]
+    ],
+    "network_retries": 4,
+    "network_retry_initial_seconds": 5
   },
   "headless": false,
   "target_locations": [

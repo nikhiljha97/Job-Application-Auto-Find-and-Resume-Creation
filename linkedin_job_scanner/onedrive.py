@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 from urllib.parse import quote
 
 import requests
@@ -15,6 +16,18 @@ GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 DEFAULT_SCOPES = ["Files.ReadWrite", "User.Read"]
+TRANSIENT_ERROR_MARKERS = (
+    "Failed to resolve",
+    "NameResolutionError",
+    "nodename nor servname",
+    "Temporary failure in name resolution",
+    "Max retries exceeded",
+    "Connection aborted",
+    "Connection reset",
+    "Read timed out",
+    "ConnectTimeout",
+)
+T = TypeVar("T")
 
 
 def onedrive_ready(config: dict[str, Any]) -> tuple[bool, str]:
@@ -318,15 +331,22 @@ def _request(
     request_headers = {"Authorization": f"Bearer {token}"}
     if headers:
         request_headers.update(headers)
-    response = requests.request(
-        method,
-        url,
-        json=json_body,
-        data=data,
-        headers=request_headers,
-        timeout=90,
-        allow_redirects=allow_redirects,
-    )
+
+    def send() -> requests.Response:
+        response = requests.request(
+            method,
+            url,
+            json=json_body,
+            data=data,
+            headers=request_headers,
+            timeout=90,
+            allow_redirects=allow_redirects,
+        )
+        if response.status_code in {429, 500, 502, 503, 504}:
+            raise RuntimeError(f"Transient Microsoft Graph response: {response.status_code} {response.text}")
+        return response
+
+    response = _with_transient_retries(config, send, "Microsoft Graph request")
     if raise_for_status:
         try:
             response.raise_for_status()
@@ -350,21 +370,55 @@ def _access_token(config: dict[str, Any]) -> str:
     cache = msal.SerializableTokenCache()
     if token_path.exists():
         cache.deserialize(token_path.read_text(encoding="utf-8"))
-    app = msal.PublicClientApplication(
-        client_id=client_id,
-        authority=f"https://login.microsoftonline.com/{tenant_id}",
-        token_cache=cache,
-    )
-    account = app.get_accounts()[0] if app.get_accounts() else None
-    result = app.acquire_token_silent(scopes, account=account)
-    if not result:
-        flow = app.initiate_device_flow(scopes=scopes)
-        if "user_code" not in flow:
-            raise RuntimeError(f"Could not start Microsoft device flow: {flow}")
-        print(flow["message"])
-        result = app.acquire_token_by_device_flow(flow)
+    def fetch_token() -> dict[str, Any] | None:
+        app = msal.PublicClientApplication(
+            client_id=client_id,
+            authority=f"https://login.microsoftonline.com/{tenant_id}",
+            token_cache=cache,
+        )
+        account = app.get_accounts()[0] if app.get_accounts() else None
+        result = app.acquire_token_silent(scopes, account=account)
+        if not result:
+            flow = app.initiate_device_flow(scopes=scopes)
+            if "user_code" not in flow:
+                raise RuntimeError(f"Could not start Microsoft device flow: {flow}")
+            print(flow["message"])
+            result = app.acquire_token_by_device_flow(flow)
+        return result
+
+    result = _with_transient_retries(config, fetch_token, "Microsoft authentication")
     if cache.has_state_changed:
         token_path.write_text(cache.serialize(), encoding="utf-8")
     if not result or "access_token" not in result:
         raise RuntimeError(f"Microsoft authentication failed: {result}")
     return str(result["access_token"])
+
+
+def _with_transient_retries(config: dict[str, Any], fn: Callable[[], T], label: str) -> T:
+    onedrive_config = config.get("onedrive", {})
+    attempts = max(1, int(onedrive_config.get("network_retries", 4)))
+    delay = float(onedrive_config.get("network_retry_initial_seconds", 5))
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            if attempt >= attempts or not _is_transient_network_error(exc):
+                raise
+            print(f"{label} failed transiently ({attempt}/{attempts}); retrying in {delay:.0f}s: {exc}")
+            time.sleep(delay)
+            delay = min(delay * 2, 60)
+    raise RuntimeError(f"{label} failed after retries.")
+
+
+def _is_transient_network_error(exc: Exception) -> bool:
+    if isinstance(
+        exc,
+        (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ),
+    ):
+        return True
+    message = str(exc)
+    return any(marker in message for marker in TRANSIENT_ERROR_MARKERS)
