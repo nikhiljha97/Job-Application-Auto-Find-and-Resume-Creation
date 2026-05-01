@@ -81,6 +81,10 @@ class LinkedInScanner:
                             source_url=page_url,
                             scraped_at=utc_now_iso(),
                             easy_apply=bool(details.get("easy_apply", False)),
+                            accepting_applications=bool(details.get("accepting_applications", True)),
+                            application_status=clean_text(str(details.get("application_status", "Unknown"))),
+                            applicant_count=optional_int(details.get("applicant_count")),
+                            applicant_count_text=clean_text(str(details.get("applicant_count_text", ""))),
                         )
                         print("Collected 1 direct job from this page.")
                         continue
@@ -94,8 +98,6 @@ class LinkedInScanner:
                     job_url = normalize_job_url(str(data.get("url", "")), job_id)
                     key = job_id or job_url
                     if not key or key in jobs:
-                        continue
-                    if key in self.known_job_keys:
                         continue
 
                     try:
@@ -111,6 +113,7 @@ class LinkedInScanner:
                     location = details.get("location") or data.get("location") or ""
                     description = details.get("description") or data.get("description") or ""
                     final_url = normalize_job_url(details.get("url") or job_url, job_id)
+                    accepting_applications = bool(details.get("accepting_applications", True))
 
                     if not title or not final_url:
                         continue
@@ -125,6 +128,10 @@ class LinkedInScanner:
                         scraped_at=utc_now_iso(),
                         listed_at=clean_text(str(data.get("listed_at", ""))),
                         easy_apply=bool(details.get("easy_apply", False)),
+                        accepting_applications=accepting_applications,
+                        application_status=clean_text(str(details.get("application_status", "Unknown"))),
+                        applicant_count=optional_int(details.get("applicant_count")),
+                        applicant_count_text=clean_text(str(details.get("applicant_count_text", ""))),
                     )
                     page_job_count += 1
                 detail_page.close()
@@ -583,6 +590,15 @@ def clean_title(value: str) -> str:
     return title
 
 
+def optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 CARD_EVALUATE_JS = """
 (el) => {
   const root = el.closest("li[data-occludable-job-id], .job-card-container, [data-job-id], li, div") || el;
@@ -701,15 +717,53 @@ DETAIL_EVALUATE_JS = """
     ".job-view-layout"
   ]);
   const link = document.querySelector("a[href*='/jobs/view/']");
-  const easyApply = !!Array.from(document.querySelectorAll("button, a"))
-    .find((node) => /easy apply/i.test(node.innerText || ""));
+  const pageText = document.body ? document.body.innerText || "" : "";
+  const topCard = document.querySelector(".jobs-unified-top-card, .job-details-jobs-unified-top-card");
+  const topCardText = topCard ? topCard.innerText || "" : "";
+  const actionNodes = Array.from(document.querySelectorAll("button, a"));
+  const easyApply = !!actionNodes.find((node) => /easy apply/i.test(node.innerText || ""));
+  const hasApplyButton = !!actionNodes.find((node) => {
+    const text = (node.innerText || "").trim();
+    const disabled = node.disabled || node.getAttribute("aria-disabled") === "true";
+    return !disabled && /^(easy apply|apply)$/i.test(text);
+  });
+  const noLongerAccepting = /no longer accepting applications?/i.test(pageText);
+  const parseApplicants = (text) => {
+    const compact = text.replace(/\\s+/g, " ");
+    const patterns = [
+      /over\\s+([\\d,]+)\\s+applicants?/i,
+      /be among (?:the )?first\\s+([\\d,]+)\\s+applicants?/i,
+      /([\\d,]+)\\s+applicants?/i
+    ];
+    for (const pattern of patterns) {
+      const match = compact.match(pattern);
+      if (!match) continue;
+      const value = parseInt(match[1].replace(/,/g, ""), 10);
+      if (!Number.isFinite(value)) continue;
+      return {
+        count: pattern.source.startsWith("over") ? value + 1 : value,
+        text: match[0]
+      };
+    }
+    return null;
+  };
+  const applicants = parseApplicants(topCardText) || parseApplicants(pageText) || { count: null, text: "" };
+  const acceptingApplications = !noLongerAccepting;
   return {
     title,
     company,
     location,
     description,
     url: link ? link.href : window.location.href,
-    easy_apply: easyApply
+    easy_apply: easyApply,
+    accepting_applications: acceptingApplications,
+    application_status: noLongerAccepting
+      ? "No Longer Accepting Applications"
+      : hasApplyButton
+        ? "Accepting Applications"
+        : "Unknown",
+    applicant_count: applicants.count,
+    applicant_count_text: applicants.text
   };
 }
 """

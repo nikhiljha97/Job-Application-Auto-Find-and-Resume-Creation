@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .google_drive import export_google_doc_as_docx, extract_google_doc_id
-from .models import JobPosting, ScoreResult
+from .models import JobPosting, ScoreResult, applicant_sort_value
 from .onedrive import download_onedrive_docx, resolve_onedrive_item_id
 from .text_utils import safe_filename
 
@@ -18,6 +18,9 @@ SHEET_HEADERS = [
     "Title",
     "Company",
     "Location",
+    "Applicants",
+    "Applicant Count Text",
+    "Application Status",
     "Job Link",
     "Google Resume Link",
     "Google Resume ID",
@@ -48,9 +51,14 @@ def sync_google_sheet(
     existing = _existing_rows_by_job_id(worksheet)
 
     ranked = sorted(
-        [job for job in jobs if job.key() in scores and scores[job.key()].overall_score >= min_score],
-        key=lambda item: scores[item.key()].overall_score,
-        reverse=True,
+        [
+            job
+            for job in jobs
+            if job.key() in scores
+            and scores[job.key()].overall_score >= min_score
+            and job.accepting_applications
+        ],
+        key=lambda item: (applicant_sort_value(item), -scores[item.key()].overall_score),
     )
     rows = [SHEET_HEADERS]
     for job in ranked:
@@ -64,6 +72,9 @@ def sync_google_sheet(
                 job.title,
                 job.company,
                 job.location,
+                job.applicant_count,
+                job.applicant_count_text,
+                job.application_status,
                 job.url,
                 score.google_doc_url,
                 score.google_doc_id,

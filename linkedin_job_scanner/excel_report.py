@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
-from .models import JobPosting, ScoreResult
+from .models import JobPosting, ScoreResult, applicant_sort_value
 
 
 APPLICATION_STATUS_OPTIONS = ["Not Applied Yet", "Applied"]
@@ -18,6 +18,9 @@ RANKED_HEADERS = [
     "Title",
     "Company",
     "Location",
+    "Applicants",
+    "Applicant Count Text",
+    "Application Status",
     "Job Link",
     "Google Resume Link",
     "Google Resume ID",
@@ -47,6 +50,9 @@ RAW_HEADERS = [
     "Title",
     "Company",
     "Location",
+    "Applicants",
+    "Applicant Count Text",
+    "Application Status",
     "URL",
     "Source URL",
     "Scraped At",
@@ -75,9 +81,14 @@ def write_excel_report(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     ranked = sorted(
-        (job for job in jobs if job.key() in scores and scores[job.key()].overall_score >= min_score),
-        key=lambda item: scores[item.key()].overall_score,
-        reverse=True,
+        (
+            job
+            for job in jobs
+            if job.key() in scores
+            and scores[job.key()].overall_score >= min_score
+            and job.accepting_applications
+        ),
+        key=lambda item: (applicant_sort_value(item), -scores[item.key()].overall_score),
     )
 
     wb = Workbook()
@@ -95,6 +106,9 @@ def write_excel_report(
             job.title,
             job.company,
             job.location,
+            job.applicant_count,
+            job.applicant_count_text,
+            job.application_status,
             job.url,
             score.google_doc_url,
             score.google_doc_id,
@@ -128,6 +142,9 @@ def write_excel_report(
                 job.title,
                 job.company,
                 job.location,
+                job.applicant_count,
+                job.applicant_count_text,
+                job.application_status,
                 job.url,
                 job.source_url,
                 job.scraped_at,
@@ -140,16 +157,27 @@ def write_excel_report(
     _add_ranked_dropdowns(ws, DataValidation)
 
     for row in range(2, ws.max_row + 1):
-        ws.cell(row=row, column=8).hyperlink = ws.cell(row=row, column=8).value
-        ws.cell(row=row, column=8).style = "Hyperlink"
-        for col in (9, 11, 17):
+        header_cols = {str(cell.value): cell.column for cell in ws[1] if cell.value}
+        job_link_col = header_cols.get("Job Link")
+        hyperlink_cols = [
+            header_cols.get("Google Resume Link"),
+            header_cols.get("OneDrive Resume Link"),
+            header_cols.get("Generated Resume"),
+        ]
+        if job_link_col:
+            ws.cell(row=row, column=job_link_col).hyperlink = ws.cell(row=row, column=job_link_col).value
+            ws.cell(row=row, column=job_link_col).style = "Hyperlink"
+        for col in [item for item in hyperlink_cols if item]:
             if ws.cell(row=row, column=col).value:
                 ws.cell(row=row, column=col).hyperlink = ws.cell(row=row, column=col).value
                 ws.cell(row=row, column=col).style = "Hyperlink"
 
+    raw_header_cols = {str(cell.value): cell.column for cell in raw_ws[1] if cell.value}
+    raw_url_col = raw_header_cols.get("URL")
     for row in range(2, raw_ws.max_row + 1):
-        raw_ws.cell(row=row, column=5).hyperlink = raw_ws.cell(row=row, column=5).value
-        raw_ws.cell(row=row, column=5).style = "Hyperlink"
+        if raw_url_col:
+            raw_ws.cell(row=row, column=raw_url_col).hyperlink = raw_ws.cell(row=row, column=raw_url_col).value
+            raw_ws.cell(row=row, column=raw_url_col).style = "Hyperlink"
 
     wb.save(output)
     return str(output)

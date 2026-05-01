@@ -21,6 +21,10 @@ class JobPosting:
     scraped_at: str = field(default_factory=utc_now_iso)
     listed_at: str = ""
     easy_apply: bool = False
+    accepting_applications: bool = True
+    application_status: str = "Unknown"
+    applicant_count: int | None = None
+    applicant_count_text: str = ""
 
     def key(self) -> str:
         return self.job_id or self.url
@@ -49,6 +53,10 @@ class JobPosting:
             "scraped_at": self.scraped_at,
             "listed_at": self.listed_at,
             "easy_apply": self.easy_apply,
+            "accepting_applications": self.accepting_applications,
+            "application_status": self.application_status,
+            "applicant_count": self.applicant_count,
+            "applicant_count_text": self.applicant_count_text,
         }
 
     @classmethod
@@ -64,6 +72,10 @@ class JobPosting:
             scraped_at=str(data.get("scraped_at", utc_now_iso())),
             listed_at=str(data.get("listed_at", "")),
             easy_apply=bool(data.get("easy_apply", False)),
+            accepting_applications=bool(data.get("accepting_applications", True)),
+            application_status=str(data.get("application_status", "Unknown")),
+            applicant_count=_optional_int(data.get("applicant_count")),
+            applicant_count_text=str(data.get("applicant_count_text", "")),
         )
 
 
@@ -132,6 +144,19 @@ class ScoreResult:
             onedrive_doc_id=str(data.get("onedrive_doc_id", "")),
             notes=str(data.get("notes", "")),
         )
+
+
+def applicant_sort_value(job: JobPosting) -> int:
+    return job.applicant_count if job.applicant_count is not None else 1_000_000
+
+
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass

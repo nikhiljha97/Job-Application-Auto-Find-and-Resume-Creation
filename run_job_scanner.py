@@ -14,7 +14,7 @@ from linkedin_job_scanner.google_drive import google_drive_ready, upload_docx_as
 from linkedin_job_scanner.google_sheets import sync_google_sheet
 from linkedin_job_scanner.google_sheets import download_trusted_google_resume_sources
 from linkedin_job_scanner.linkedin import LinkedInScanner
-from linkedin_job_scanner.models import JobPosting
+from linkedin_job_scanner.models import JobPosting, applicant_sort_value
 from linkedin_job_scanner.notifications import notify_after_run
 from linkedin_job_scanner.onedrive import (
     download_excel_from_onedrive,
@@ -119,9 +119,13 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
 
     min_score = float(config.get("min_score", 6.0))
     ranked_jobs = sorted(
-        [job for job in existing_jobs.values() if scores[job.key()].overall_score >= min_score],
-        key=lambda item: scores[item.key()].overall_score,
-        reverse=True,
+        [
+            job
+            for job in existing_jobs.values()
+            if scores[job.key()].overall_score >= min_score
+            and job.accepting_applications
+        ],
+        key=lambda item: (applicant_sort_value(item), -scores[item.key()].overall_score),
     )
 
     if create_resumes:
@@ -190,12 +194,12 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
             job
             for job in scanned_jobs
             if job.key() in scores
+            and job.accepting_applications
             and scores[job.key()].overall_score >= min_score
             and job.key() not in existing_keys
             and (not bool(config.get("notify_only_new_jobs", True)) or job.key() not in notified_keys)
         ],
-        key=lambda item: scores[item.key()].overall_score,
-        reverse=True,
+        key=lambda item: (applicant_sort_value(item), -scores[item.key()].overall_score),
     )
 
     try:
@@ -219,7 +223,8 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
         print("Top matches:")
         for job in ranked_jobs[:5]:
             score = scores[job.key()]
-            print(f"  {score.overall_score:.2f}/10 - {job.title} - {job.company} - {job.url}")
+            applicants = job.applicant_count_text or "applicants unknown"
+            print(f"  {score.overall_score:.2f}/10 - {applicants} - {job.title} - {job.company} - {job.url}")
 
 
 def _valid_file(path: Path) -> bool:
