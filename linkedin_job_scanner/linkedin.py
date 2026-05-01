@@ -113,7 +113,18 @@ class LinkedInScanner:
                     location = details.get("location") or data.get("location") or ""
                     description = details.get("description") or data.get("description") or ""
                     final_url = normalize_job_url(details.get("url") or job_url, job_id)
-                    accepting_applications = bool(details.get("accepting_applications", True))
+                    accepting_applications = bool(details.get("accepting_applications", True)) and bool(
+                        data.get("accepting_applications", True)
+                    )
+                    applicant_count = optional_int(details.get("applicant_count"))
+                    applicant_count_text = clean_text(str(details.get("applicant_count_text", "")))
+                    if applicant_count is None:
+                        applicant_count = optional_int(data.get("applicant_count"))
+                    if not applicant_count_text:
+                        applicant_count_text = clean_text(str(data.get("applicant_count_text", "")))
+                    application_status = clean_text(str(details.get("application_status", "")))
+                    if not application_status or application_status == "Unknown":
+                        application_status = clean_text(str(data.get("application_status", "Unknown")))
 
                     if not title or not final_url:
                         continue
@@ -129,9 +140,9 @@ class LinkedInScanner:
                         listed_at=clean_text(str(data.get("listed_at", ""))),
                         easy_apply=bool(details.get("easy_apply", False)),
                         accepting_applications=accepting_applications,
-                        application_status=clean_text(str(details.get("application_status", "Unknown"))),
-                        applicant_count=optional_int(details.get("applicant_count")),
-                        applicant_count_text=clean_text(str(details.get("applicant_count_text", ""))),
+                        application_status=application_status,
+                        applicant_count=applicant_count,
+                        applicant_count_text=applicant_count_text,
                     )
                     page_job_count += 1
                 detail_page.close()
@@ -630,6 +641,25 @@ COLLECT_SEARCH_RESULTS_JS = """
 () => {
   const seen = new Set();
   const rows = [];
+  const parseApplicants = (text) => {
+    const compact = (text || "").replace(/\\s+/g, " ");
+    const patterns = [
+      /over\\s+([\\d,]+)\\s+(?:applicants?|people clicked apply)/i,
+      /be among (?:the )?first\\s+([\\d,]+)\\s+(?:applicants?|people clicked apply)/i,
+      /([\\d,]+)\\s+(?:applicants?|people clicked apply)/i
+    ];
+    for (const pattern of patterns) {
+      const match = compact.match(pattern);
+      if (!match) continue;
+      const value = parseInt(match[1].replace(/,/g, ""), 10);
+      if (!Number.isFinite(value)) continue;
+      return {
+        count: pattern.source.startsWith("over") ? value + 1 : value,
+        text: match[0]
+      };
+    }
+    return { count: null, text: "" };
+  };
   const anchors = Array.from(document.querySelectorAll("a[href*='/jobs/view/']"));
   for (const link of anchors) {
     const href = link.href || "";
@@ -644,6 +674,9 @@ COLLECT_SEARCH_RESULTS_JS = """
       const node = root.querySelector(selector);
       return node && node.innerText ? node.innerText.trim() : "";
     };
+    const rowText = root.innerText || link.innerText || "";
+    const applicants = parseApplicants(rowText);
+    const noLongerAccepting = /no longer accepting applications?/i.test(rowText);
     rows.push({
       job_id: root.getAttribute("data-occludable-job-id") || root.dataset.jobId || jobId,
       title: text(".job-card-list__title, .job-card-container__link, a[href*='/jobs/view/']") || link.innerText.trim(),
@@ -651,7 +684,11 @@ COLLECT_SEARCH_RESULTS_JS = """
       location: text(".artdeco-entity-lockup__caption, .job-card-container__metadata-item"),
       listed_at: text("time, .job-card-container__listed-time"),
       url: href,
-      description: root.innerText || link.innerText || ""
+      description: rowText,
+      accepting_applications: !noLongerAccepting,
+      application_status: noLongerAccepting ? "No Longer Accepting Applications" : "Unknown",
+      applicant_count: applicants.count,
+      applicant_count_text: applicants.text
     });
   }
   return rows;
@@ -731,9 +768,9 @@ DETAIL_EVALUATE_JS = """
   const parseApplicants = (text) => {
     const compact = text.replace(/\\s+/g, " ");
     const patterns = [
-      /over\\s+([\\d,]+)\\s+applicants?/i,
-      /be among (?:the )?first\\s+([\\d,]+)\\s+applicants?/i,
-      /([\\d,]+)\\s+applicants?/i
+      /over\\s+([\\d,]+)\\s+(?:applicants?|people clicked apply)/i,
+      /be among (?:the )?first\\s+([\\d,]+)\\s+(?:applicants?|people clicked apply)/i,
+      /([\\d,]+)\\s+(?:applicants?|people clicked apply)/i
     ];
     for (const pattern of patterns) {
       const match = compact.match(pattern);
