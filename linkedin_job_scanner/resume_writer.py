@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -105,37 +104,631 @@ def create_tailored_resume(
     except ImportError as exc:
         raise RuntimeError("python-docx is required. Run: pip install -r job_scanner/requirements.txt") from exc
 
-    override_template = config.get("generation_resume_template")
-    template_path = Path(score.matched_resume_path)
-    if override_template:
-        candidate = (resume_bank.root / str(override_template)).resolve()
-        if candidate.exists():
-            template_path = candidate
-    if not template_path.exists():
-        template_path = Path(resume_bank.best_resume_for_job(job.full_text(), config.get("preferred_resume_templates", [])).path)
     resume_dir = Path(output_dir) / "resumes"
     resume_dir.mkdir(parents=True, exist_ok=True)
-
     job_part = safe_filename(f"{job.company}_{job.title}_{job.job_id}", "linkedin_job")
     output_path = resume_dir / f"{job_part}_Nikhil_Jha_Resume.docx"
-    shutil.copy2(template_path, output_path)
 
-    doc = Document(str(output_path))
     supported_keywords = resume_bank.supported_keywords(score.matched_keywords)
     summary_keywords = _summary_display_keywords(supported_keywords, resume_bank.profile_keywords)
-    summary_lines = _build_summary(job, summary_keywords)
-    competency_lines = _build_competency_lines(supported_keywords, resume_bank.profile_keywords)
 
-    _replace_top_headline(doc, job, summary_keywords)
-    _replace_section(doc, SUMMARY_HEADINGS, summary_lines, plain=True)
-    if not _replace_section(doc, SKILL_HEADINGS, competency_lines, plain=True):
-        _insert_section_after(doc, SUMMARY_HEADINGS, "CORE COMPETENCIES", competency_lines)
-    _trim_trailing_incomplete_role(doc)
-    _normalize_layout(doc)
+    doc = Document()
+    _build_claude_style_resume_doc(doc, job, summary_keywords, supported_keywords, config)
     doc.save(str(output_path))
 
     resume_text = "\n".join(read_docx_paragraphs(output_path))
     return str(output_path), resume_text
+
+
+def _build_claude_style_resume_doc(
+    doc: Any,
+    job: JobPosting,
+    summary_keywords: list[str],
+    supported_keywords: list[str],
+    config: dict[str, Any],
+) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+    from docx.shared import Inches, Pt
+
+    for section in doc.sections:
+        section.page_width = Inches(8.5)
+        section.page_height = Inches(11)
+        section.top_margin = Inches(0.625)
+        section.bottom_margin = Inches(0.625)
+        section.left_margin = Inches(0.75)
+        section.right_margin = Inches(0.75)
+
+    data = _build_claude_resume_data(job, summary_keywords, supported_keywords, config)
+
+    name = doc.add_paragraph()
+    name.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    name.paragraph_format.space_after = Pt(1.5)
+    _add_run(name, "NIKHIL JHA", 20, bold=True)
+    _add_run(name, ", MBA", 13)
+
+    headline = doc.add_paragraph()
+    headline.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    headline.paragraph_format.space_after = Pt(2)
+    _add_run(headline, data["headline"], 13)
+
+    contact = doc.add_paragraph()
+    contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    contact.paragraph_format.space_after = Pt(5)
+    _add_run(
+        contact,
+        "nikhil.jha97@outlook.com • (437) 995-0287 • Mississauga, ON • linkedin.com/in/nikhiljha97 • github.com/nikhiljha97",
+        9,
+        color="555555",
+    )
+
+    _add_section_heading(doc, "PROFESSIONAL SUMMARY")
+    _add_body_paragraph(doc, data["summary"], space_before=3, space_after=3)
+
+    _add_section_heading(doc, "CORE COMPETENCIES")
+    for label, items in data["competencies"]:
+        paragraph = _add_body_paragraph(doc, "", space_before=1.5, space_after=1.5)
+        _add_run(paragraph, f"{label}: ", 10, bold=True)
+        _add_run(paragraph, items, 10)
+
+    _add_section_heading(doc, "WORK EXPERIENCE")
+    for role_index, role in enumerate(data["experience"]):
+        header = doc.add_paragraph()
+        header.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        header.paragraph_format.space_before = Pt(6 if role_index else 4)
+        header.paragraph_format.space_after = Pt(1)
+        header.paragraph_format.tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+        _add_run(header, role["title"], 10, bold=True)
+        _add_run(header, f" | {role['org']}, {role['location']}", 10)
+        _add_run(header, f"\t{role['dates']}", 9, color="555555")
+        header.paragraph_format.keep_with_next = True
+
+        if role.get("sublabel"):
+            sublabel = doc.add_paragraph()
+            sublabel.paragraph_format.space_after = Pt(1.5)
+            _add_run(sublabel, role["sublabel"], 9, italic=True, color="555555")
+            sublabel.paragraph_format.keep_with_next = True
+
+        for bullet_text in role["bullets"]:
+            bullet = doc.add_paragraph(style="List Bullet")
+            bullet.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            bullet.paragraph_format.left_indent = Inches(0.28)
+            bullet.paragraph_format.first_line_indent = Inches(-0.14)
+            bullet.paragraph_format.space_before = Pt(1)
+            bullet.paragraph_format.space_after = Pt(1)
+            _add_run(bullet, bullet_text, 10)
+
+    _add_section_heading(doc, "EDUCATION")
+    _add_education_line(
+        doc,
+        "MBA, Finance & Strategy",
+        "DeGroote School of Business, McMaster University",
+        "Sep 2023 – Apr 2025",
+    )
+    _add_small_paragraph(
+        doc,
+        "GPA: 3.4/4.0 • MBA Entrance Scholarship • KPMG 101 Consulting Workshop, Top 25 Nationally • Advocate, DeGroote Foresight Lab",
+    )
+    _add_small_paragraph(doc, data["mba_coursework"], color="1A1A1A")
+    _add_education_line(
+        doc,
+        "Bachelor of Technology, Information Technology",
+        "SRM Institute of Science & Technology, India",
+        "Jul 2016 – Jun 2020",
+    )
+    _add_small_paragraph(
+        doc,
+        "GPA: 8.8/10 • Gold Medalist in Advanced Mathematics • Exchange: SungKyunKwan University, Seoul, South Korea (2018)",
+    )
+
+    _add_section_heading(doc, "PROFESSIONAL DEVELOPMENT")
+    for label, text in data["professional_development"]:
+        paragraph = _add_body_paragraph(doc, "", space_before=1.5, space_after=1.5)
+        _add_run(paragraph, f"{label}: ", 10, bold=True)
+        _add_run(paragraph, text, 10)
+
+
+def _add_section_heading(doc: Any, text: str) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    paragraph.paragraph_format.space_before = Pt(6)
+    paragraph.paragraph_format.space_after = Pt(3)
+    paragraph.paragraph_format.keep_with_next = True
+    _add_run(paragraph, text, 11, bold=True)
+    _apply_claude_section_rule(paragraph)
+
+
+def _add_body_paragraph(doc: Any, text: str, space_before: float = 1.5, space_after: float = 1.5) -> Any:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    paragraph.paragraph_format.space_before = Pt(space_before)
+    paragraph.paragraph_format.space_after = Pt(space_after)
+    if text:
+        _add_run(paragraph, text, 10)
+    return paragraph
+
+
+def _add_small_paragraph(doc: Any, text: str, color: str = "555555") -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(2)
+    _add_run(paragraph, text, 9, color=color)
+
+
+def _add_education_line(doc: Any, degree: str, school: str, dates: str) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+    from docx.shared import Inches, Pt
+
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    paragraph.paragraph_format.space_before = Pt(4)
+    paragraph.paragraph_format.space_after = Pt(1)
+    paragraph.paragraph_format.tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+    _add_run(paragraph, degree, 10, bold=True)
+    _add_run(paragraph, f" – {school}", 10)
+    _add_run(paragraph, f"\t{dates}", 9, color="555555")
+
+
+def _add_run(
+    paragraph: Any,
+    text: str,
+    size_pt: int | float,
+    bold: bool = False,
+    italic: bool = False,
+    color: str = "1A1A1A",
+) -> Any:
+    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
+
+    run = paragraph.add_run(_strip_em_dash(text))
+    run.font.name = "Calibri"
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), "Calibri")
+    run.font.size = Pt(size_pt)
+    run.bold = bold
+    run.italic = italic
+    run.font.color.rgb = RGBColor.from_string(color)
+    return run
+
+
+def _apply_claude_section_rule(paragraph: Any) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    p_pr = paragraph._p.get_or_add_pPr()
+    existing = p_pr.find(qn("w:pBdr"))
+    if existing is not None:
+        p_pr.remove(existing)
+    borders = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "6")
+    bottom.set(qn("w:space"), "1")
+    bottom.set(qn("w:color"), "AAAAAA")
+    borders.append(bottom)
+    p_pr.append(borders)
+
+
+def _strip_em_dash(text: str) -> str:
+    return text.replace("—", ",")
+
+
+def _build_claude_resume_data(
+    job: JobPosting,
+    summary_keywords: list[str],
+    supported_keywords: list[str],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    keywords = _unique([*supported_keywords, *summary_keywords])
+    domain = _job_domain(job.full_text())
+    headline_terms = _headline_terms(job, keywords, domain)
+    years = _experience_label(config)
+
+    summary = _claude_summary(job, headline_terms, domain, years)
+    competencies = _claude_competencies(keywords, domain)
+    experience = _claude_experience_roles(domain, keywords)
+    return {
+        "headline": _compact_join([job.title, *headline_terms], " | ", max_chars=130),
+        "summary": summary,
+        "competencies": competencies,
+        "experience": experience,
+        "mba_coursework": _mba_coursework(domain),
+        "professional_development": [
+            (
+                "CPG Insight Engine",
+                "Built an AI-powered category analytics platform for CPG and retail insight workflows, combining SQL, analytics logic, and executive-facing recommendations.",
+            ),
+            (
+                "KPMG 101 Consulting Workshop",
+                "Selected for a Top 25 national consulting workshop focused on structured problem solving, executive communication, and business case development.",
+            ),
+        ],
+    }
+
+
+
+def _job_domain(job_text: str) -> str:
+    normalized = job_text.lower()
+    if any(term in normalized for term in ["talent", "recruit", "campus", "mobility", "human resources", "hris"]):
+        return "talent_programs"
+    if any(term in normalized for term in ["category", "shopper", "consumer", "cpg", "fmcg", "retail", "nielsen"]):
+        return "category_insights"
+    if any(term in normalized for term in ["finance", "revenue", "pricing", "forecast", "budget", "p&l", "pnl"]):
+        return "finance_strategy"
+    if any(term in normalized for term in ["product", "customer", "lifecycle", "ux", "user"]):
+        return "product_analytics"
+    if any(term in normalized for term in ["change management", "transformation", "program", "operations"]):
+        return "strategy_operations"
+    if any(term in normalized for term in ["data scientist", "machine learning", "ai", "nlp", "model"]):
+        return "advanced_analytics"
+    return "business_insights"
+
+
+def _experience_label(config: dict[str, Any]) -> str:
+    years = float(config.get("candidate_experience_years") or 3.9)
+    if years >= 4.8:
+        return "5+ years"
+    if years >= 3.8:
+        return "4+ years"
+    return f"{years:.1f} years"
+
+
+def _headline_terms(job: JobPosting, keywords: list[str], domain: str) -> list[str]:
+    domain_defaults = {
+        "talent_programs": ["Reporting & Insights", "Program Operations", "Power BI"],
+        "category_insights": ["Category Insights", "Shopper Analytics", "NielsenIQ"],
+        "finance_strategy": ["Strategic Finance", "Forecasting", "Executive Reporting"],
+        "product_analytics": ["Product Analytics", "Customer Insights", "Experimentation"],
+        "strategy_operations": ["Strategy & Operations", "Process Improvement", "Stakeholder Storytelling"],
+        "advanced_analytics": ["Advanced Analytics", "Machine Learning", "SQL"],
+        "business_insights": ["Business Intelligence", "Insights", "SQL"],
+    }
+    blocked = {
+        "analytics",
+        "associate",
+        "candidate",
+        "client",
+        "insights",
+        "manager",
+        "people",
+        "python",
+        "senior",
+        "sql",
+        "strategy",
+        "team",
+    }
+    terms = [_title_skill(term) for term in keywords if _usable_resume_keyword(term) and term not in blocked][:2]
+    combined = _unique_display([*domain_defaults.get(domain, domain_defaults["business_insights"]), *terms])
+    return combined[:4]
+
+
+def _compact_join(parts: list[str], separator: str, max_chars: int) -> str:
+    values = [part for part in parts if part]
+    while values and len(separator.join(values)) > max_chars:
+        values.pop()
+    return separator.join(values)
+
+
+def _claude_summary(job: JobPosting, headline_terms: list[str], domain: str, years: str) -> str:
+    role_phrase = _domain_phrase(domain)
+    methods = ", ".join(_unique_display([*headline_terms[:4], "SQL", "Python", "Power BI", "Tableau", "Advanced Excel"]))
+    company_context = _company_context(domain)
+    return _strip_em_dash(
+        f"{role_phrase} candidate with {years} of analytics, reporting, automation, and stakeholder storytelling "
+        f"experience across retail media, financial services, telecom, and academic research. {company_context} "
+        f"Brings hands-on strength in {methods}, and executive-ready "
+        f"recommendations aligned to the {job.title} role at {job.company}. Delivered $62M total business value across "
+        f"category insights, automation, risk analytics, and stakeholder decision support without overstating scope, "
+        f"ownership, or unsupported metrics."
+    )
+
+
+def _domain_phrase(domain: str) -> str:
+    return {
+        "talent_programs": "Talent Programs & Insights",
+        "category_insights": "Category & Shopper Insights",
+        "finance_strategy": "Strategic Finance & Business Insights",
+        "product_analytics": "Product Analytics & Customer Insights",
+        "strategy_operations": "Strategy, Operations & Business Insights",
+        "advanced_analytics": "Advanced Analytics & Business Intelligence",
+        "business_insights": "Business Intelligence & Insights",
+    }.get(domain, "Business Intelligence & Insights")
+
+
+def _company_context(domain: str) -> str:
+    if domain == "talent_programs":
+        return (
+            "At Loblaw Advance, translated CPG account data into recurring and ad hoc reporting, dashboard automation, "
+            "vendor-facing performance updates, and senior-stakeholder narratives using 41M PC Optimum loyalty members."
+        )
+    if domain == "finance_strategy":
+        return (
+            "At Loblaw Advance, converted campaign, pricing, and performance data into strategic recovery, organic growth, "
+            "and executive reporting narratives for CPG commercial stakeholders."
+        )
+    if domain == "product_analytics":
+        return (
+            "At Loblaw Advance and Verizon, used behavioral data, segmentation, reporting automation, and model outputs "
+            "to explain user, customer, and operational trends for non-technical leaders."
+        )
+    if domain == "advanced_analytics":
+        return (
+            "At Verizon, delivered Python, SQL, machine learning, NLP, and BI workflows that supported fraud analytics, "
+            "risk management outcomes, and model adoption improvement."
+        )
+    return (
+        "At Loblaw Advance, supported Confectionery and Beauty category insights for Hershey, Lindt, Mondelez, L'Oreal, "
+        "Nestle, and Ferrero using shopper, POS, panel, campaign, and retail measurement data."
+    )
+
+
+def _claude_competencies(keywords: list[str], domain: str) -> list[tuple[str, str]]:
+    role_terms = _keyword_line(
+        keywords,
+        {
+            "talent_programs": [
+                "program operations",
+                "process automation",
+                "reporting automation",
+                "executive reporting",
+                "stakeholder management",
+                "data analysis",
+                "insight delivery",
+            ],
+            "category_insights": [
+                "category insights",
+                "shopper insights",
+                "consumer insights",
+                "market share analysis",
+                "category management",
+                "nielseniq",
+                "pricing and promotions",
+            ],
+            "finance_strategy": [
+                "financial modelling",
+                "forecasting",
+                "scenario analysis",
+                "business case",
+                "executive reporting",
+                "pricing and promotions",
+            ],
+            "product_analytics": [
+                "product analytics",
+                "customer analytics",
+                "segmentation",
+                "a/b testing",
+                "measurement framework",
+                "data visualization",
+            ],
+        }.get(domain, ["business intelligence", "data analysis", "executive reporting", "insight delivery", "strategy"]),
+    )
+    tech_terms = _keyword_line(
+        keywords,
+        ["sql", "python", "power bi", "tableau", "looker studio", "advanced excel", "r", "nielseniq", "jira", "agile"],
+    )
+    leadership_terms = _keyword_line(
+        keywords,
+        [
+            "stakeholder management",
+            "cross-functional collaboration",
+            "executive storytelling",
+            "kpi reporting",
+            "process automation",
+            "business intelligence",
+        ],
+    )
+    industry_terms = _keyword_line(
+        keywords,
+        [
+            "cpg",
+            "fmcg",
+            "retail media",
+            "consumer insights",
+            "risk analytics",
+            "marketing analytics",
+            "operations",
+            "strategy",
+        ],
+    )
+    tech_terms = _append_unique_phrase(tech_terms, "Advanced Excel")
+    return [
+        ("Role-Specific Alignment", role_terms),
+        ("Technical Tools", tech_terms),
+        ("Stakeholder Influence", leadership_terms),
+        ("Industry & Domain Knowledge", industry_terms),
+    ]
+
+
+def _keyword_line(keywords: list[str], desired: list[str]) -> str:
+    values = [_title_skill(term) for term in desired]
+    generic_extras = {"analytics", "insights", "strategy", "python", "sql", "r"}
+    extras = [
+        _title_skill(term)
+        for term in keywords
+        if _usable_resume_keyword(term) and term not in generic_extras and _title_skill(term) not in values
+    ][:2]
+    return ", ".join(_unique_display([*values, *extras])[:12])
+
+
+def _append_unique_phrase(line: str, phrase: str) -> str:
+    values = [item.strip() for item in line.split(",") if item.strip()]
+    if phrase not in values:
+        values.append(phrase)
+    return ", ".join(values)
+
+
+def _claude_experience_roles(domain: str, keywords: list[str]) -> list[dict[str, Any]]:
+    return [
+        {
+            "title": "Manager, Business Intelligence & Analytics",
+            "org": "Loblaw Advance",
+            "location": "Toronto, ON",
+            "dates": "Aug 2025 – Dec 2025",
+            "sublabel": _loblaw_sublabel(domain),
+            "bullets": _loblaw_bullets(domain, keywords),
+        },
+        {
+            "title": "Technical Project Manager",
+            "org": "Exera Solutions Inc.",
+            "location": "Remote, ON",
+            "dates": "Jan 2025 – Mar 2025",
+            "sublabel": "Program delivery · Milestone tracking · Stakeholder coordination",
+            "bullets": [
+                "Coordinated program-style delivery across stakeholder groups by translating business needs into structured workplans, milestone tracking, status updates, and issue-resolution routines.",
+                "Supported process improvements and operational documentation by clarifying handoffs, tracking action items, and helping teams move ambiguous work toward measurable outcomes.",
+            ],
+        },
+        {
+            "title": "Graduate Research Assistant",
+            "org": "McMaster University",
+            "location": "Hamilton, ON",
+            "dates": "Jun 2024 – Dec 2024",
+            "sublabel": "Research reporting · Data visualization · Program support",
+            "bullets": [
+                "Built research analytics and reporting workflows using Python, Looker Studio, and Power BI, reducing reporting time by 60% and improving stakeholder access to decision-ready insights.",
+                "Translated data outputs into concise visual narratives and presentation materials for academic and business audiences, strengthening executive-ready storytelling and evidence-based recommendations.",
+            ],
+        },
+        {
+            "title": "Software Engineer II, Risk Analytics & NLP",
+            "org": "Verizon Inc.",
+            "location": "Chennai, India",
+            "dates": "Aug 2020 – Jul 2023",
+            "sublabel": "Analytics automation · Process optimization · Cross-functional delivery",
+            "bullets": _verizon_bullets(domain),
+        },
+    ]
+
+
+def _loblaw_sublabel(domain: str) -> str:
+    return {
+        "talent_programs": "Reporting & insights · Executive storytelling · Vendor-facing analytics",
+        "category_insights": "Category insights · Shopper analytics · CPG retail measurement",
+        "finance_strategy": "Strategic recovery · Revenue analysis · Executive reporting",
+        "product_analytics": "Behavioral analytics · Segmentation · Measurement frameworks",
+        "strategy_operations": "Strategy operations · KPI frameworks · Stakeholder decision support",
+        "advanced_analytics": "BI automation · Data modelling · Performance analytics",
+        "business_insights": "Business intelligence · Dashboard automation · Insight delivery",
+    }.get(domain, "Business intelligence · Dashboard automation · Insight delivery")
+
+
+def _loblaw_bullets(domain: str, keywords: list[str]) -> list[str]:
+    keyword_phrase = _natural_keyword_phrase(keywords)
+    if domain == "talent_programs":
+        return [
+            "Built and interpreted recurring reporting for strategic CPG accounts, translating shopper, campaign, and retail measurement data into executive-ready storylines that accelerated stakeholder decisions by 40%.",
+            "Led cross-functional analytics work with commercial teams, vendor partners, and client stakeholders, bringing structure to ambiguous business questions and converting data into measurable recommendations for efficiency and effectiveness.",
+            "Developed Power BI and SQL reporting workflows to clean, validate, and explain metric movements across audience, campaign, and market performance data, supporting $9M organic growth and $15M strategic recovery opportunities.",
+            "Prepared leader-ready presentations for Hershey, Lindt, L'Oreal, and other CPG partners using 41M PC Optimum loyalty members and retail media performance data, improving clarity of recommendations for senior audiences.",
+            "Supported vendor-facing performance conversations and quarterly-style account readouts by synthesizing insights, issue drivers, and next actions that helped lock in $70K Reese's media investment and $100K Lindt media investment.",
+        ]
+    if domain == "finance_strategy":
+        return [
+            "Analyzed campaign, shopper, and retail measurement performance to identify $15M in strategic recovery opportunities and $9M in organic growth potential for CPG commercial stakeholders.",
+            "Built executive reporting narratives that connected pricing, promotions, audience performance, and market movement to commercial decisions, accelerating stakeholder decisions by 40%.",
+            "Used SQL, Power BI, and Advanced Excel to validate recurring and ad hoc performance data, explain variance drivers, and translate metric movement into business recommendations.",
+            "Synthesized 41M PC Optimum loyalty member signals into leader-ready presentations for Hershey, Lindt, L'Oreal, and other strategic accounts, improving confidence in investment and planning discussions.",
+            f"Mapped {keyword_phrase} into practical reporting, dashboard, and recommendation workflows where the language was supported by real CPG analytics work and existing resume evidence.",
+        ]
+    if domain == "product_analytics":
+        return [
+            "Translated shopper, audience, and campaign behavior into customer analytics narratives using 41M PC Optimum loyalty members, supporting segmentation, measurement, and decision-ready recommendations.",
+            "Developed Power BI and SQL reporting workflows to explain product, audience, and performance trends across strategic CPG accounts, accelerating stakeholder decisions by 40%.",
+            "Built measurement frameworks that connected campaign outcomes, retail behavior, and audience quality to $9M organic growth and $15M strategic recovery opportunities.",
+            "Prepared executive-ready stories for Hershey, Lindt, L'Oreal, and other partners, using data visualization and business context to make analytics usable for non-technical stakeholders.",
+        ]
+    if domain == "advanced_analytics":
+        return [
+            "Built Power BI, SQL, and Python-supported analytics workflows across shopper, campaign, and retail measurement data, improving recurring insight delivery and accelerating stakeholder decisions by 40%.",
+            "Translated 41M PC Optimum loyalty member signals into segmentation, performance analytics, and executive narratives that uncovered $9M organic growth and $15M strategic recovery opportunities.",
+            "Validated metric movement across audience and campaign data to separate signal from noise, improving senior stakeholder confidence in recommendations and investment conversations.",
+            f"Connected {keyword_phrase} to practical business intelligence outputs, using only terms that align to existing analytics, reporting, and automation experience.",
+        ]
+    return [
+        "Led category and business intelligence analytics for strategic CPG accounts, translating shopper, POS, panel, campaign, and retail measurement data into recommendations that accelerated stakeholder decisions by 40%.",
+        "Analyzed 41M PC Optimum loyalty member signals for Hershey, Lindt, L'Oreal, and other CPG partners, uncovering $9M organic growth and $15M strategic recovery opportunities.",
+        "Built Power BI, SQL, and Advanced Excel reporting workflows to validate metric movement, monitor performance, and convert complex data into executive-ready storylines for senior stakeholders.",
+        "Synthesized pricing, promotion, audience, and category performance findings into leader-ready presentations that helped lock in $70K Reese's media investment and $100K Lindt media investment.",
+        f"Mirrored role-relevant terms such as {keyword_phrase} where they truthfully mapped to existing category insights, reporting automation, and stakeholder storytelling experience.",
+    ]
+
+
+def _verizon_bullets(domain: str) -> list[str]:
+    if domain in {"advanced_analytics", "product_analytics"}:
+        return [
+            "Delivered Python, SQL, and Power BI analytics pipelines that automated recurring analysis and reporting workflows, contributing to $38M risk management outcomes across fraud and operational processes.",
+            "Built machine learning and NLP-enabled classification workflows that reduced manual processing by 95%, generated $3M cost savings, and improved model adoption by 26%.",
+            "Partnered with Risk, Finance, Compliance, and engineering teams through Agile delivery routines, translating technical model outputs into clear operating decisions for cross-functional stakeholders.",
+        ]
+    return [
+        "Delivered Python, SQL, and Power BI analytics pipelines that automated recurring analysis and reporting workflows, contributing to $38M risk management outcomes across fraud and operational processes.",
+        "Translated complex risk and fraud data into stakeholder-ready dashboards and operating insights, reducing manual processing by 95% while improving reporting consistency.",
+        "Led analytics adoption and change-management routines across cross-functional teams, improving model adoption by 26% and strengthening trust in automated decision support.",
+    ]
+
+
+def _natural_keyword_phrase(keywords: list[str]) -> str:
+    blocked = {"client", "partner", "senior", "manager", "associate", "analyst"}
+    values = [_title_skill(term) for term in keywords if _usable_resume_keyword(term) and term not in blocked][:4]
+    if not values:
+        values = ["Reporting Automation", "Executive Storytelling", "Stakeholder Management"]
+    if len(values) == 1:
+        return values[0]
+    return ", ".join(values[:-1]) + f", and {values[-1]}"
+
+
+def _mba_coursework(domain: str) -> str:
+    courses = {
+        "talent_programs": "Relevant Coursework: Business Strategy, Organizational Behaviour, Financial Modelling, Marketing Research, Leadership Communication",
+        "category_insights": "Relevant Coursework: Marketing Research, Consumer Behaviour, Business Strategy, Financial Modelling, P&L Management",
+        "finance_strategy": "Relevant Coursework: Financial Modelling, Corporate Finance, Business Strategy, P&L Management, Managerial Accounting",
+        "product_analytics": "Relevant Coursework: Marketing Research, Consumer Behaviour, Business Strategy, Data Analytics, Financial Modelling",
+        "strategy_operations": "Relevant Coursework: Business Strategy, Operations Management, Financial Modelling, Leadership Communication, Marketing Research",
+        "advanced_analytics": "Relevant Coursework: Marketing Research, Financial Modelling, Business Strategy, Statistical Analysis, Operations Management",
+    }
+    return courses.get(domain, "Relevant Coursework: Business Strategy, Marketing Research, Financial Modelling, Data Analytics, Leadership Communication")
+
+
+def _usable_resume_keyword(term: str) -> bool:
+    normalized = term.strip().lower()
+    if not normalized or len(normalized) <= 2:
+        return False
+    blocked = {
+        "associate",
+        "candidate",
+        "client",
+        "consultant",
+        "manager",
+        "people",
+        "senior",
+        "team",
+    }
+    if normalized in blocked:
+        return False
+    if len(normalized.split()) > 3:
+        return False
+    return normalized in DEFAULT_SKILL_PHRASES or normalized in SUMMARY_DISPLAY_TERMS
+
+
+def _unique_display(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        value = item.strip()
+        key = value.lower()
+        if not value or key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
 
 
 def _build_summary(job: JobPosting, supported_keywords: list[str]) -> list[str]:

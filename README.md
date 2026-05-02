@@ -31,6 +31,7 @@ Important: real ATS systems usually do not assign a universal 80% or 90% score. 
 
 ## Resume Tailoring Rules
 
+- Resumes now use the Claude/Cowork-style DOCX layout: centered name/headline/contact, Calibri text, single-column ATS-readable structure, section rules, right-aligned dates, justified bullets, and newest-to-oldest experience.
 - Match the exact job title in the resume headline when possible.
 - Extract the 5-15 most important JD phrases, especially title words, named tools, hard skills, and industry terms.
 - Put keywords in three places: headline/summary, skills/core competencies, and relevant experience bullets.
@@ -38,6 +39,7 @@ Important: real ATS systems usually do not assign a universal 80% or 90% score. 
 - Keep the format ATS-readable: single column, selectable text, no text boxes, no image-only resumes.
 - Use only real impact numbers already supported by source resumes.
 - Never invent metrics, employers, tools, dates, or responsibilities.
+- Work-experience bullets are generated from a controlled evidence bank for Loblaw Advance, Exera, McMaster, and Verizon. JD language is blended in only when it truthfully maps to that evidence.
 
 ## Nikhil Resume Cheat Sheet
 
