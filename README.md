@@ -41,6 +41,7 @@ Important: real ATS systems usually do not assign a universal 80% or 90% score. 
 - Never invent metrics, employers, tools, dates, or responsibilities.
 - Work-experience bullets are generated from a controlled evidence bank for Loblaw Advance, Exera, McMaster, and Verizon. JD language is blended in only when it truthfully maps to that evidence.
 - Cover letters and cold outreach use the same blended evidence rules: company/role-specific language from the JD, real experience from the resume bank, and only approved impact metrics.
+- When OneDrive is available, the tracker also stores OneDrive links for generated cover letters and cold outreach DOCX files.
 
 ## Nikhil Resume Cheat Sheet
 

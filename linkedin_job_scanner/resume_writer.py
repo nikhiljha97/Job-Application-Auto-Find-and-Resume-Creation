@@ -132,7 +132,16 @@ def ensure_tailored_companion_materials(
     config: dict[str, Any],
 ) -> tuple[str, str]:
     """Create cover letter and cold outreach files for an existing generated resume."""
-    if score.cover_letter_path and Path(score.cover_letter_path).exists() and score.cold_outreach_path and Path(score.cold_outreach_path).exists():
+    cover_path = Path(score.cover_letter_path) if score.cover_letter_path else None
+    outreach_path = Path(score.cold_outreach_path) if score.cold_outreach_path else None
+    if (
+        cover_path
+        and cover_path.exists()
+        and cover_path.suffix.lower() == ".docx"
+        and outreach_path
+        and outreach_path.exists()
+        and outreach_path.suffix.lower() == ".docx"
+    ):
         return score.cover_letter_path, score.cold_outreach_path
 
     supported_keywords = resume_bank.supported_keywords(score.matched_keywords)
@@ -389,7 +398,7 @@ def _write_companion_materials(
     outreach_dir.mkdir(parents=True, exist_ok=True)
 
     cover_path = cover_dir / f"{job_part}_Nikhil_Jha_Cover_Letter.docx"
-    outreach_path = outreach_dir / f"{job_part}_Nikhil_Jha_Cold_Outreach.txt"
+    outreach_path = outreach_dir / f"{job_part}_Nikhil_Jha_Cold_Outreach.docx"
 
     try:
         from docx import Document
@@ -399,7 +408,9 @@ def _write_companion_materials(
     cover_doc = Document()
     _build_claude_style_cover_letter_doc(cover_doc, job, data)
     cover_doc.save(str(cover_path))
-    outreach_path.write_text(_cold_outreach_text(job, data), encoding="utf-8")
+    outreach_doc = Document()
+    _build_cold_outreach_doc(outreach_doc, job, data)
+    outreach_doc.save(str(outreach_path))
     return str(cover_path), str(outreach_path)
 
 
@@ -455,6 +466,49 @@ def _add_left_line(doc: Any, text: str, after: float = 4) -> None:
     paragraph = doc.add_paragraph()
     paragraph.paragraph_format.space_after = Pt(after)
     _add_run(paragraph, text, 10)
+
+
+def _build_cold_outreach_doc(doc: Any, job: JobPosting, data: dict[str, Any]) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches, Pt
+
+    for section in doc.sections:
+        section.page_width = Inches(8.5)
+        section.page_height = Inches(11)
+        section.top_margin = Inches(0.75)
+        section.bottom_margin = Inches(0.75)
+        section.left_margin = Inches(0.875)
+        section.right_margin = Inches(0.875)
+
+    outreach = data["cold_outreach"]
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.paragraph_format.space_after = Pt(8)
+    _add_run(title, f"{job.company} - {job.title}", 13, bold=True)
+    _add_run(title, " - Cold Outreach", 11)
+
+    _add_outreach_section(doc, "SEARCH TIPS", outreach["search_tips"])
+    _add_outreach_section(doc, "LINKEDIN CONNECTION NOTE", outreach["connection"])
+    _add_outreach_section(doc, "LINKEDIN FOLLOW-UP MESSAGE", outreach["followup"])
+    _add_outreach_section(doc, f"EMAIL SUBJECT: {outreach['email_subject']}", outreach["email_body"])
+    _add_outreach_section(doc, "NOTE", outreach["notes"])
+
+
+def _add_outreach_section(doc: Any, heading: str, body: str) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(8)
+    paragraph.paragraph_format.space_after = Pt(3)
+    _add_run(paragraph, heading, 11, bold=True)
+    _apply_claude_section_rule(paragraph)
+
+    for chunk in body.split("\n\n"):
+        body_para = doc.add_paragraph()
+        body_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        body_para.paragraph_format.space_after = Pt(5)
+        _add_run(body_para, chunk, 10)
 
 
 def _cover_letter_paragraphs(job: JobPosting, domain: str, headline_terms: list[str]) -> list[str]:

@@ -100,6 +100,10 @@ class ScoreResult:
     onedrive_doc_id: str = ""
     cover_letter_path: str = ""
     cold_outreach_path: str = ""
+    onedrive_cover_letter_url: str = ""
+    onedrive_cover_letter_id: str = ""
+    onedrive_cold_outreach_url: str = ""
+    onedrive_cold_outreach_id: str = ""
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -123,6 +127,10 @@ class ScoreResult:
             "onedrive_doc_id": self.onedrive_doc_id,
             "cover_letter_path": self.cover_letter_path,
             "cold_outreach_path": self.cold_outreach_path,
+            "onedrive_cover_letter_url": self.onedrive_cover_letter_url,
+            "onedrive_cover_letter_id": self.onedrive_cover_letter_id,
+            "onedrive_cold_outreach_url": self.onedrive_cold_outreach_url,
+            "onedrive_cold_outreach_id": self.onedrive_cold_outreach_id,
             "notes": self.notes,
         }
 
@@ -148,6 +156,10 @@ class ScoreResult:
             onedrive_doc_id=str(data.get("onedrive_doc_id", "")),
             cover_letter_path=str(data.get("cover_letter_path", "")),
             cold_outreach_path=str(data.get("cold_outreach_path", "")),
+            onedrive_cover_letter_url=str(data.get("onedrive_cover_letter_url", "")),
+            onedrive_cover_letter_id=str(data.get("onedrive_cover_letter_id", "")),
+            onedrive_cold_outreach_url=str(data.get("onedrive_cold_outreach_url", "")),
+            onedrive_cold_outreach_id=str(data.get("onedrive_cold_outreach_id", "")),
             notes=str(data.get("notes", "")),
         )
 

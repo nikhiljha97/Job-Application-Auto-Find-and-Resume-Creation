@@ -115,7 +115,11 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
 
     scores = state.load_scores()
     for job in existing_jobs.values():
-        scores[job.key()] = score_job(job, resume_bank, config)
+        previous_score = scores.get(job.key())
+        refreshed_score = score_job(job, resume_bank, config)
+        if previous_score:
+            _carry_generated_outputs(previous_score, refreshed_score)
+        scores[job.key()] = refreshed_score
 
     min_score = float(config.get("min_score", 6.0))
     ranked_jobs = sorted(
@@ -154,6 +158,8 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
                             score.onedrive_doc_url = doc_url
                         except Exception as exc:
                             print(f"OneDrive upload failed for {existing_resume_path}: {exc}", file=sys.stderr)
+                    if one_ready:
+                        _upload_companion_docs_to_onedrive(config, score)
                     continue
                 if existing_resume_path.exists():
                     existing_resume_path.unlink()
@@ -177,6 +183,8 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
                     score.onedrive_doc_url = doc_url
                 except Exception as exc:
                     print(f"OneDrive upload failed for {resume_path}: {exc}", file=sys.stderr)
+            if one_ready:
+                _upload_companion_docs_to_onedrive(config, score)
             created += 1
         print(f"Created {created} tailored resumes.")
     else:
@@ -229,6 +237,48 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
             score = scores[job.key()]
             applicants = job.applicant_count_text or "applicants unknown"
             print(f"  {score.overall_score:.2f}/10 - {applicants} - {job.title} - {job.company} - {job.url}")
+
+
+def _upload_companion_docs_to_onedrive(config: dict[str, Any], score: Any) -> None:
+    if score.cover_letter_path and not score.onedrive_cover_letter_url:
+        cover_path = Path(score.cover_letter_path)
+        if cover_path.exists() and cover_path.suffix.lower() == ".docx":
+            try:
+                doc_id, doc_url = upload_docx_to_onedrive(config, cover_path, cover_path.stem)
+                score.onedrive_cover_letter_id = doc_id
+                score.onedrive_cover_letter_url = doc_url
+            except Exception as exc:
+                print(f"OneDrive cover letter upload failed for {cover_path}: {exc}", file=sys.stderr)
+    if score.cold_outreach_path and not score.onedrive_cold_outreach_url:
+        outreach_path = Path(score.cold_outreach_path)
+        if outreach_path.exists() and outreach_path.suffix.lower() == ".docx":
+            try:
+                doc_id, doc_url = upload_docx_to_onedrive(config, outreach_path, outreach_path.stem)
+                score.onedrive_cold_outreach_id = doc_id
+                score.onedrive_cold_outreach_url = doc_url
+            except Exception as exc:
+                print(f"OneDrive cold outreach upload failed for {outreach_path}: {exc}", file=sys.stderr)
+
+
+def _carry_generated_outputs(previous_score: Any, refreshed_score: Any) -> None:
+    fields = [
+        "resume_path",
+        "resume_ats_score",
+        "google_doc_url",
+        "google_doc_id",
+        "onedrive_doc_url",
+        "onedrive_doc_id",
+        "cover_letter_path",
+        "cold_outreach_path",
+        "onedrive_cover_letter_url",
+        "onedrive_cover_letter_id",
+        "onedrive_cold_outreach_url",
+        "onedrive_cold_outreach_id",
+    ]
+    for field in fields:
+        value = getattr(previous_score, field, "")
+        if value:
+            setattr(refreshed_score, field, value)
 
 
 def _valid_file(path: Path) -> bool:
