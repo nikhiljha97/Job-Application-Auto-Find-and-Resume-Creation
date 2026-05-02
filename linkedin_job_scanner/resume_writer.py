@@ -111,21 +111,43 @@ def create_tailored_resume(
 
     supported_keywords = resume_bank.supported_keywords(score.matched_keywords)
     summary_keywords = _summary_display_keywords(supported_keywords, resume_bank.profile_keywords)
+    data = _build_claude_resume_data(job, summary_keywords, supported_keywords, config)
 
     doc = Document()
-    _build_claude_style_resume_doc(doc, job, summary_keywords, supported_keywords, config)
+    _build_claude_style_resume_doc(doc, data)
     doc.save(str(output_path))
+    cover_path, outreach_path = _write_companion_materials(job, data, job_part, output_dir)
+    score.cover_letter_path = cover_path
+    score.cold_outreach_path = outreach_path
 
     resume_text = "\n".join(read_docx_paragraphs(output_path))
     return str(output_path), resume_text
 
 
+def ensure_tailored_companion_materials(
+    job: JobPosting,
+    score: ScoreResult,
+    resume_bank: ResumeBank,
+    output_dir: str | Path,
+    config: dict[str, Any],
+) -> tuple[str, str]:
+    """Create cover letter and cold outreach files for an existing generated resume."""
+    if score.cover_letter_path and Path(score.cover_letter_path).exists() and score.cold_outreach_path and Path(score.cold_outreach_path).exists():
+        return score.cover_letter_path, score.cold_outreach_path
+
+    supported_keywords = resume_bank.supported_keywords(score.matched_keywords)
+    summary_keywords = _summary_display_keywords(supported_keywords, resume_bank.profile_keywords)
+    data = _build_claude_resume_data(job, summary_keywords, supported_keywords, config)
+    job_part = safe_filename(f"{job.company}_{job.title}_{job.job_id}", "linkedin_job")
+    cover_path, outreach_path = _write_companion_materials(job, data, job_part, output_dir)
+    score.cover_letter_path = cover_path
+    score.cold_outreach_path = outreach_path
+    return cover_path, outreach_path
+
+
 def _build_claude_style_resume_doc(
     doc: Any,
-    job: JobPosting,
-    summary_keywords: list[str],
-    supported_keywords: list[str],
-    config: dict[str, Any],
+    data: dict[str, Any],
 ) -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
     from docx.shared import Inches, Pt
@@ -137,8 +159,6 @@ def _build_claude_style_resume_doc(
         section.bottom_margin = Inches(0.625)
         section.left_margin = Inches(0.75)
         section.right_margin = Inches(0.75)
-
-    data = _build_claude_resume_data(job, summary_keywords, supported_keywords, config)
 
     name = doc.add_paragraph()
     name.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -341,6 +361,8 @@ def _build_claude_resume_data(
         "competencies": competencies,
         "experience": experience,
         "mba_coursework": _mba_coursework(domain),
+        "cover_letter": _cover_letter_paragraphs(job, domain, headline_terms),
+        "cold_outreach": _cold_outreach(job, domain, headline_terms),
         "professional_development": [
             (
                 "CPG Insight Engine",
@@ -352,6 +374,172 @@ def _build_claude_resume_data(
             ),
         ],
     }
+
+
+def _write_companion_materials(
+    job: JobPosting,
+    data: dict[str, Any],
+    job_part: str,
+    output_dir: str | Path,
+) -> tuple[str, str]:
+    cover_dir = Path(output_dir) / "cover_letters"
+    outreach_dir = Path(output_dir) / "cold_outreach"
+    cover_dir.mkdir(parents=True, exist_ok=True)
+    outreach_dir.mkdir(parents=True, exist_ok=True)
+
+    cover_path = cover_dir / f"{job_part}_Nikhil_Jha_Cover_Letter.docx"
+    outreach_path = outreach_dir / f"{job_part}_Nikhil_Jha_Cold_Outreach.txt"
+
+    try:
+        from docx import Document
+    except ImportError as exc:
+        raise RuntimeError("python-docx is required. Run: pip install -r job_scanner/requirements.txt") from exc
+
+    cover_doc = Document()
+    _build_claude_style_cover_letter_doc(cover_doc, job, data)
+    cover_doc.save(str(cover_path))
+    outreach_path.write_text(_cold_outreach_text(job, data), encoding="utf-8")
+    return str(cover_path), str(outreach_path)
+
+
+def _build_claude_style_cover_letter_doc(doc: Any, job: JobPosting, data: dict[str, Any]) -> None:
+    from datetime import datetime
+
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches, Pt
+
+    for section in doc.sections:
+        section.page_width = Inches(8.5)
+        section.page_height = Inches(11)
+        section.top_margin = Inches(0.75)
+        section.bottom_margin = Inches(0.75)
+        section.left_margin = Inches(0.875)
+        section.right_margin = Inches(0.875)
+
+    name = doc.add_paragraph()
+    name.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    name.paragraph_format.space_after = Pt(2)
+    _add_run(name, "NIKHIL JHA", 20, bold=True)
+    _add_run(name, ", MBA", 13)
+
+    contact = doc.add_paragraph()
+    contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    contact.paragraph_format.space_after = Pt(12)
+    _add_run(contact, "nikhil.jha97@outlook.com • (437) 995-0287 • Mississauga, ON • linkedin.com/in/nikhiljha97", 9, color="555555")
+
+    _add_left_line(doc, datetime.now().strftime("%B %-d, %Y"), after=8)
+    _add_left_line(doc, "Hiring Manager", after=2)
+    _add_left_line(doc, job.company, after=10)
+
+    re_line = doc.add_paragraph()
+    re_line.paragraph_format.space_after = Pt(10)
+    _add_run(re_line, "Re: ", 10, bold=True)
+    _add_run(re_line, job.title, 10)
+
+    _add_left_line(doc, "Dear Hiring Manager,", after=8)
+    for paragraph_text in data["cover_letter"]:
+        paragraph = doc.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        paragraph.paragraph_format.space_after = Pt(8)
+        _add_run(paragraph, paragraph_text, 10)
+
+    _add_left_line(doc, "Sincerely,", after=16)
+    closing = doc.add_paragraph()
+    _add_run(closing, "Nikhil Jha, MBA", 10, bold=True)
+
+
+def _add_left_line(doc: Any, text: str, after: float = 4) -> None:
+    from docx.shared import Pt
+
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.space_after = Pt(after)
+    _add_run(paragraph, text, 10)
+
+
+def _cover_letter_paragraphs(job: JobPosting, domain: str, headline_terms: list[str]) -> list[str]:
+    role_phrase = _domain_phrase(domain)
+    terms = ", ".join(_unique_display([*headline_terms[:3], "SQL", "Power BI", "Advanced Excel"]))
+    return [
+        _strip_em_dash(
+            f"{job.company}'s {job.title} role stands out because it needs someone who can turn messy operating, "
+            f"reporting, and stakeholder information into practical recommendations. I bring a background aligned with "
+            f"{role_phrase.lower()}, with analytics, reporting automation, and executive storytelling experience across CPG retail media, "
+            f"telecom, financial services, and academic research."
+        ),
+        _strip_em_dash(
+            "At Loblaw Advance, I translated shopper, campaign, retail measurement, and CPG account data into recurring "
+            "and ad hoc reporting for senior stakeholders and vendor-facing conversations. That work used 41M PC Optimum "
+            "loyalty members, Power BI, SQL, and executive-ready storylines to uncover $9M in organic growth and $15M in "
+            "strategic recovery opportunities while improving decision speed by 40%."
+        ),
+        _strip_em_dash(
+            f"My broader experience adds the technical and operating discipline behind that storytelling: {terms}, Python, "
+            "dashboard automation, cross-functional delivery, and clear translation of technical findings for non-technical "
+            "leaders. At Verizon, I delivered analytics and automation workflows tied to $38M in risk management outcomes, "
+            "95% manual processing reduction, and 26% model adoption improvement."
+        ),
+        _strip_em_dash(
+            f"I would bring {job.company} a practical mix of analytical depth, business judgment, and concise communication. "
+            "I am careful about evidence, direct about tradeoffs, and strongest when turning ambiguous data into decisions "
+            "that teams can act on quickly."
+        ),
+    ]
+
+
+def _cold_outreach(job: JobPosting, domain: str, headline_terms: list[str]) -> dict[str, str]:
+    role_phrase = _domain_phrase(domain)
+    terms = ", ".join(headline_terms[:3])
+    return {
+        "connection": _strip_em_dash(
+            f"Hi, I applied for {job.title} at {job.company}. My background spans {role_phrase.lower()}, Power BI, SQL, "
+            "and executive-ready reporting needs through work at Loblaw Advance and Verizon. Would be glad to connect."
+        )[:290],
+        "followup": _strip_em_dash(
+            f"Hi, I recently applied for the {job.title} role at {job.company}. At Loblaw Advance, I turned shopper, campaign, "
+            "and CPG account data into reporting and senior-stakeholder stories using 41M PC Optimum loyalty members, Power BI, "
+            "and SQL. The work uncovered $9M in organic growth and $15M in strategic recovery opportunities. I would welcome "
+            f"the chance to bring the same mix of {terms}, practical analytics, and executive communication to your team."
+        ),
+        "email_subject": f"{job.title} application, Nikhil Jha",
+        "email_body": _strip_em_dash(
+            f"Hi,\n\nI applied for the {job.title} role at {job.company} and wanted to briefly introduce myself. I bring "
+            f"experience aligned with {role_phrase.lower()} across CPG retail media, telecom, financial services, and academic research, "
+            "with hands-on work in Power BI, SQL, Python, Advanced Excel, and stakeholder-ready reporting.\n\nAt Loblaw Advance, "
+            "I translated shopper, campaign, and retail measurement data for strategic CPG accounts using 41M PC Optimum "
+            "loyalty members, uncovering $9M in organic growth and $15M in strategic recovery opportunities. At Verizon, "
+            "I delivered analytics automation tied to $38M in risk management outcomes.\n\nIf helpful, I would appreciate "
+            "being pointed to the right person for the role.\n\nBest,\nNikhil Jha\n(437) 995-0287\nlinkedin.com/in/nikhiljha97"
+        ),
+        "search_tips": f"Search LinkedIn for {job.company} talent acquisition, hiring manager, analytics leader, insights leader, or the job poster.",
+        "notes": "Uses only verified experience and approved metrics. Review company-specific phrasing before sending.",
+    }
+
+
+def _cold_outreach_text(job: JobPosting, data: dict[str, Any]) -> str:
+    outreach = data["cold_outreach"]
+    return "\n".join(
+        [
+            f"{job.company} - {job.title} - Cold Outreach",
+            "=" * 60,
+            "",
+            f"Search tips: {outreach['search_tips']}",
+            "",
+            "LINKEDIN CONNECTION NOTE",
+            "-" * 32,
+            outreach["connection"],
+            "",
+            "LINKEDIN FOLLOW-UP MESSAGE",
+            "-" * 32,
+            outreach["followup"],
+            "",
+            f"EMAIL SUBJECT: {outreach['email_subject']}",
+            "-" * 32,
+            outreach["email_body"],
+            "",
+            f"NOTE: {outreach['notes']}",
+            "",
+        ]
+    )
 
 
 

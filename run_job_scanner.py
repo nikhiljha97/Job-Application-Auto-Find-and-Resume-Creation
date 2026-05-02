@@ -24,7 +24,7 @@ from linkedin_job_scanner.onedrive import (
     upload_excel_to_onedrive,
 )
 from linkedin_job_scanner.resume_bank import ResumeBank
-from linkedin_job_scanner.resume_writer import create_tailored_resume
+from linkedin_job_scanner.resume_writer import create_tailored_resume, ensure_tailored_companion_materials
 from linkedin_job_scanner.scoring import estimate_resume_ats_score, score_job
 from linkedin_job_scanner.state import ScannerState
 
@@ -136,6 +136,10 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
             if score.resume_path:
                 existing_resume_path = Path(score.resume_path)
                 if _valid_file(existing_resume_path):
+                    try:
+                        ensure_tailored_companion_materials(job, score, resume_bank, output_dir, config)
+                    except Exception as exc:
+                        print(f"Companion material generation failed for {existing_resume_path}: {exc}", file=sys.stderr)
                     if drive_ready and not score.google_doc_url:
                         try:
                             doc_id, doc_url = upload_docx_as_google_doc(config, existing_resume_path, existing_resume_path.stem)

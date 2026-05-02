@@ -31,6 +31,8 @@ RANKED_HEADERS = [
     "Application Date",
     "Application Notes",
     "Generated Resume",
+    "Generated Cover Letter",
+    "Cold Outreach",
     "Role Fit",
     "Skill Match",
     "Experience Match",
@@ -119,6 +121,8 @@ def write_excel_report(
             preserved.get("Application Date", ""),
             preserved.get("Application Notes", preserved.get("Notes", "")),
             score.resume_path,
+            score.cover_letter_path,
+            score.cold_outreach_path,
             score.role_fit,
             score.skill_match,
             score.experience_match,
@@ -163,6 +167,8 @@ def write_excel_report(
             header_cols.get("Google Resume Link"),
             header_cols.get("OneDrive Resume Link"),
             header_cols.get("Generated Resume"),
+            header_cols.get("Generated Cover Letter"),
+            header_cols.get("Cold Outreach"),
         ]
         if job_link_col:
             ws.cell(row=row, column=job_link_col).hyperlink = ws.cell(row=row, column=job_link_col).value

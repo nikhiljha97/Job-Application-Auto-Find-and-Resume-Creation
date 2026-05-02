@@ -98,6 +98,8 @@ class ScoreResult:
     google_doc_id: str = ""
     onedrive_doc_url: str = ""
     onedrive_doc_id: str = ""
+    cover_letter_path: str = ""
+    cold_outreach_path: str = ""
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -119,6 +121,8 @@ class ScoreResult:
             "google_doc_id": self.google_doc_id,
             "onedrive_doc_url": self.onedrive_doc_url,
             "onedrive_doc_id": self.onedrive_doc_id,
+            "cover_letter_path": self.cover_letter_path,
+            "cold_outreach_path": self.cold_outreach_path,
             "notes": self.notes,
         }
 
@@ -142,6 +146,8 @@ class ScoreResult:
             google_doc_id=str(data.get("google_doc_id", "")),
             onedrive_doc_url=str(data.get("onedrive_doc_url", "")),
             onedrive_doc_id=str(data.get("onedrive_doc_id", "")),
+            cover_letter_path=str(data.get("cover_letter_path", "")),
+            cold_outreach_path=str(data.get("cold_outreach_path", "")),
             notes=str(data.get("notes", "")),
         )
 

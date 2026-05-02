@@ -8,7 +8,7 @@ The scanner is designed to run locally without an AI agent after setup. It does 
 
 1. The scanner opens LinkedIn and scans the configured search.
 2. Jobs are ranked by fit and saved to `outputs/linkedin_job_results.xlsx`.
-3. Tailored DOCX resumes are created in `outputs/resumes/`.
+3. Tailored DOCX resumes, cover letters, and cold outreach notes are created in `outputs/resumes/`, `outputs/cover_letters/`, and `outputs/cold_outreach/`.
 4. Resume DOCX files and the Excel workbook are uploaded to OneDrive.
 5. In the Excel workbook, set the `Applied` dropdown to `Applied` after you apply.
 6. On the next run, the scanner downloads the current OneDrive Excel first, preserves your dropdown choices, and downloads any `Applied` OneDrive resumes into `onedrive_source_resumes/`.
@@ -40,6 +40,7 @@ Important: real ATS systems usually do not assign a universal 80% or 90% score. 
 - Use only real impact numbers already supported by source resumes.
 - Never invent metrics, employers, tools, dates, or responsibilities.
 - Work-experience bullets are generated from a controlled evidence bank for Loblaw Advance, Exera, McMaster, and Verizon. JD language is blended in only when it truthfully maps to that evidence.
+- Cover letters and cold outreach use the same blended evidence rules: company/role-specific language from the JD, real experience from the resume bank, and only approved impact metrics.
 
 ## Nikhil Resume Cheat Sheet
 
@@ -260,6 +261,8 @@ python run_job_scanner.py --sample
 
 - `outputs/linkedin_job_results.xlsx`: ranked jobs and raw scraped jobs.
 - `outputs/resumes/`: generated DOCX resumes.
+- `outputs/cover_letters/`: generated DOCX cover letters.
+- `outputs/cold_outreach/`: generated LinkedIn/email outreach text.
 - `outputs/data/jobs.json`: historical job data.
 - `outputs/data/scores.json`: historical score data.
 - `onedrive_source_resumes/`: applied/approved OneDrive resumes downloaded for future learning.
