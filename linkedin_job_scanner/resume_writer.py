@@ -209,12 +209,13 @@ def _build_claude_style_resume_doc(
             sublabel.paragraph_format.keep_with_next = True
 
         for bullet_text in role["bullets"]:
-            bullet = doc.add_paragraph(style="List Bullet")
+            bullet = doc.add_paragraph()
             bullet.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             bullet.paragraph_format.left_indent = Inches(0.28)
             bullet.paragraph_format.first_line_indent = Inches(-0.14)
             bullet.paragraph_format.space_before = Pt(1)
             bullet.paragraph_format.space_after = Pt(1)
+            _add_run(bullet, "• ", 10)
             _add_run(bullet, bullet_text, 10)
 
     _add_section_heading(doc, "EDUCATION")
