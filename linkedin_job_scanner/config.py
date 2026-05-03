@@ -21,6 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "max_resumes_per_run": 25,
     "hourly_interval_minutes": 60,
     "headless": False,
+    "launch_agent_headless": True,
     "target_locations": ["Toronto", "Mississauga", "Hamilton", "Ontario", "Canada", "Remote", "Hybrid"],
     "target_role_keywords": ["strategy", "insight", "insights", "analytics", "analyst", "business intelligence"],
     "seniority_keywords_to_penalize": ["director", "vp", "vice president", "head of", "principal", "staff"],

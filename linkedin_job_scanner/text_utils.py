@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from functools import lru_cache
 from typing import Iterable
 
 
@@ -156,6 +157,7 @@ DEFAULT_SKILL_PHRASES = [
 ]
 
 
+@lru_cache(maxsize=4096)
 def normalize_text(text: str) -> str:
     text = text.lower()
     text = text.replace("&", " and ")
@@ -165,9 +167,14 @@ def normalize_text(text: str) -> str:
 
 
 def tokenize(text: str) -> list[str]:
+    return list(_tokenize_cached(text))
+
+
+@lru_cache(maxsize=4096)
+def _tokenize_cached(text: str) -> tuple[str, ...]:
     normalized = normalize_text(text)
     tokens = re.findall(r"[a-z0-9+#./%-]+", normalized)
-    return [t for t in tokens if len(t) > 1 and t not in STOPWORDS]
+    return tuple(t for t in tokens if len(t) > 1 and t not in STOPWORDS)
 
 
 def phrase_in_text(phrase: str, text: str) -> bool:
@@ -218,14 +225,17 @@ def weighted_coverage(required_terms: Iterable[str], text: str) -> tuple[float, 
     terms = unique_preserve_order(required_terms)
     if not terms:
         return 0.0, [], []
+    text_norm = normalize_text(text)
+    text_tokens = set(tokenize(text_norm))
     matched: list[str] = []
     missing: list[str] = []
     total_weight = 0.0
     matched_weight = 0.0
     for term in terms:
-        weight = 1.0 + min(2.0, math.log(max(1, len(tokenize(term))), 2))
+        term_tokens = set(tokenize(term))
+        weight = 1.0 + min(2.0, math.log(max(1, len(term_tokens)), 2))
         total_weight += weight
-        if phrase_in_text(term, text):
+        if term in text_norm or (term_tokens and term_tokens.issubset(text_tokens)):
             matched.append(term)
             matched_weight += weight
         else:

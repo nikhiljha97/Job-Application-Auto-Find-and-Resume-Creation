@@ -114,12 +114,16 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
         existing_jobs[job.key()] = job
 
     scores = state.load_scores()
-    for job in existing_jobs.values():
+    jobs_to_score = list(existing_jobs.values())
+    print(f"Scoring {len(jobs_to_score)} saved jobs against resume/profile bank...")
+    for index, job in enumerate(jobs_to_score, start=1):
         previous_score = scores.get(job.key())
         refreshed_score = score_job(job, resume_bank, config)
         if previous_score:
             _carry_generated_outputs(previous_score, refreshed_score)
         scores[job.key()] = refreshed_score
+        if index == len(jobs_to_score) or index % 50 == 0:
+            print(f"Scored {index}/{len(jobs_to_score)} jobs.")
 
     min_score = float(config.get("min_score", 6.0))
     ranked_jobs = sorted(
@@ -135,6 +139,7 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
     if create_resumes:
         created = 0
         max_resumes = int(config.get("max_resumes_per_run", 25))
+        print(f"Preparing resumes/companion docs for up to {max_resumes} ranked jobs.")
         for job in ranked_jobs:
             score = scores[job.key()]
             if score.resume_path:
@@ -329,6 +334,8 @@ def install_launch_agent(config: dict[str, Any], config_path: str) -> Path:
         "--config",
         str(Path(config_path).resolve()),
     ]
+    if bool(config.get("launch_agent_headless", True)):
+        program.append("--headless")
     schedule = config.get("launch_schedule", {})
     payload = {
         "Label": "com.nikhil.linkedin-job-scanner",

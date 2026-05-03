@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
@@ -42,6 +44,7 @@ class LinkedInScanner:
         jobs: dict[str, JobPosting] = {}
 
         self.profile_dir.mkdir(parents=True, exist_ok=True)
+        self._clear_stale_profile_locks()
         with sync_playwright() as playwright:
             context = playwright.chromium.launch_persistent_context(
                 str(self.profile_dir),
@@ -170,11 +173,31 @@ class LinkedInScanner:
             except Exception:
                 continue
         if needs_login:
-            if headless:
-                raise RuntimeError("LinkedIn requires login. Set headless=false and run once so you can sign in.")
+            if headless or not sys.stdin.isatty():
+                raise RuntimeError(
+                    "LinkedIn requires login. Run once from Terminal with the browser visible, sign in, "
+                    "then restart the LaunchAgent."
+                )
             print("\nLinkedIn login is required in the opened browser window.")
             print("Sign in manually, finish any security checks, then return here and press Enter.")
             input("Press Enter after LinkedIn jobs search is visible...")
+
+    def _clear_stale_profile_locks(self) -> None:
+        lock = self.profile_dir / "SingletonLock"
+        if not lock.exists() and not lock.is_symlink():
+            return
+        if lock.is_symlink():
+            target = os.readlink(lock)
+            maybe_pid = target.rsplit("-", 1)[-1]
+            if maybe_pid.isdigit() and _pid_is_running(int(maybe_pid)):
+                return
+        for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            path = self.profile_dir / name
+            try:
+                path.unlink()
+                print(f"Removed stale LinkedIn browser profile lock: {path.name}")
+            except FileNotFoundError:
+                pass
 
     def _load_visible_cards(self, page: Any) -> None:
         for _ in range(10):
@@ -608,6 +631,16 @@ def optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 CARD_EVALUATE_JS = """
