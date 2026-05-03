@@ -40,14 +40,21 @@ class ResumeBank:
         root_path = Path(root).expanduser().resolve()
         cache_path = Path(config["output_dir"]) / "data" / "resume_profile_cache.json"
         cache_path.parent.mkdir(parents=True, exist_ok=True)
+        vocabulary_signature = "|".join(DEFAULT_SKILL_PHRASES)
+        cached = _load_cache(cache_path)
+        if config.get("resume_bank_use_cache_without_rescan", True) and cached:
+            docs = [ResumeDocument.from_dict(item) for item in cached.get("documents", [])]
+            profile_text = str(cached.get("profile_text", ""))
+            keywords = list(cached.get("profile_keywords", []))
+            if docs and profile_text and cached.get("vocabulary_signature") == vocabulary_signature:
+                return cls(root=root_path, documents=docs, profile_text=profile_text, profile_keywords=keywords)
+
         docx_paths = sorted(_candidate_resume_paths(root_path, config))
         trusted_root = Path(str(config.get("trusted_resume_root", ""))).expanduser()
         if trusted_root.exists():
             docx_paths.extend(sorted(_candidate_resume_paths(trusted_root.resolve(), config)))
         signature = {str(path): path.stat().st_mtime for path in docx_paths if path.exists()}
 
-        vocabulary_signature = "|".join(DEFAULT_SKILL_PHRASES)
-        cached = _load_cache(cache_path)
         if cached and cached.get("signature") == signature and cached.get("vocabulary_signature") == vocabulary_signature:
             docs = [ResumeDocument.from_dict(item) for item in cached.get("documents", [])]
             profile_text = str(cached.get("profile_text", ""))

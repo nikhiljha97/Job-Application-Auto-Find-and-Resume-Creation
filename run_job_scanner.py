@@ -323,6 +323,7 @@ def install_launch_agent(config: dict[str, Any], config_path: str) -> Path:
 
     program = [
         sys.executable,
+        "-u",
         str(PROJECT_ROOT / "run_job_scanner.py"),
         "--once",
         "--config",

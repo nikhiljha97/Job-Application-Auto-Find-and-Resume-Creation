@@ -26,6 +26,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "seniority_keywords_to_penalize": ["director", "vp", "vice president", "head of", "principal", "staff"],
     "preferred_resume_templates": [],
     "exclude_resume_name_terms": ["coverletter", "cover letter", "statement of purpose", "~$"],
+    "resume_bank_use_cache_without_rescan": True,
 }
 
 
