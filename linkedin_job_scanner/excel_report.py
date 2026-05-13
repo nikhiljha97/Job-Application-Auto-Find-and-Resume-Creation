@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -88,15 +89,17 @@ def write_excel_report(
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    cfg = config or {}
+    visible_jobs = [job for job in jobs if _include_in_excel(job, cfg)]
     ranked = sorted(
         (
             job
-            for job in jobs
+            for job in visible_jobs
             if job.key() in scores
             and scores[job.key()].overall_score >= min_score
-            and is_actionable_job(job, config or {})
+            and is_actionable_job(job, cfg)
         ),
-        key=lambda item: (applicant_sort_value(item), -scores[item.key()].overall_score),
+        key=lambda item: _ranked_sort_key(item, scores, cfg),
     )
 
     wb = Workbook()
@@ -149,7 +152,8 @@ def write_excel_report(
 
     raw_ws = wb.create_sheet("Raw Jobs")
     raw_ws.append(RAW_HEADERS)
-    for job in jobs:
+    raw_jobs = sorted(visible_jobs, key=_scraped_at_sort_key)
+    for job in raw_jobs:
         raw_ws.append(
             [
                 job.job_id,
@@ -254,6 +258,29 @@ def read_excel_application_status(path: str | Path) -> dict[str, dict[str, str]]
                 preserved[header] = str(ws.cell(row=row, column=col).value or "").strip()
         result[job_id] = preserved
     return result
+
+
+def _include_in_excel(job: JobPosting, config: dict[str, Any]) -> bool:
+    if bool(config.get("excel_hide_closed_jobs", True)) and not job.accepting_applications:
+        return False
+    return True
+
+
+def _ranked_sort_key(job: JobPosting, scores: dict[str, ScoreResult], config: dict[str, Any]) -> tuple[Any, ...]:
+    sort_mode = str(config.get("excel_sort_mode", "latest_first")).strip().lower()
+    if sort_mode in {"applicants", "lowest_applicants"}:
+        return (applicant_sort_value(job), -scores[job.key()].overall_score, _scraped_at_sort_key(job))
+    return (_scraped_at_sort_key(job), applicant_sort_value(job), -scores[job.key()].overall_score)
+
+
+def _scraped_at_sort_key(job: JobPosting) -> float:
+    value = str(job.scraped_at or "").strip()
+    if not value:
+        return 0.0
+    try:
+        return -datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
 
 
 def _style_sheet(ws, headers, Table, TableStyleInfo, ColorScaleRule, Font, PatternFill, Alignment, get_column_letter) -> None:

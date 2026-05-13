@@ -47,6 +47,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "preferred_resume_templates": [],
     "exclude_resume_name_terms": ["coverletter", "cover letter", "statement of purpose", "~$"],
     "resume_bank_use_cache_without_rescan": True,
+    "excel_sort_mode": "latest_first",
+    "excel_hide_closed_jobs": True,
 }
 
 
