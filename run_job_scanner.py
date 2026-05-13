@@ -373,17 +373,27 @@ def install_launch_agent(config: dict[str, Any], config_path: str) -> Path:
     plist_path = Path.home() / "Library" / "LaunchAgents" / "com.nikhil.linkedin-job-scanner.plist"
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
-    program = [
-        sys.executable,
-        "-u",
-        str(PROJECT_ROOT / "run_job_scanner.py"),
-        "--once",
-        "--config",
-        str(Path(config_path).resolve()),
-    ]
-    if bool(config.get("launch_agent_headless", True)):
-        program.append("--headless")
     schedule = config.get("launch_schedule", {})
+    use_scheduler_wrapper = schedule.get("mode") == "daily_times"
+    if use_scheduler_wrapper:
+        program = [
+            sys.executable,
+            "-u",
+            str(PROJECT_ROOT / "run_scheduled_job_scanner.py"),
+            "--config",
+            str(Path(config_path).resolve()),
+        ]
+    else:
+        program = [
+            sys.executable,
+            "-u",
+            str(PROJECT_ROOT / "run_job_scanner.py"),
+            "--once",
+            "--config",
+            str(Path(config_path).resolve()),
+        ]
+        if bool(config.get("launch_agent_headless", True)):
+            program.append("--headless")
     payload = {
         "Label": "com.nikhil.linkedin-job-scanner",
         "ProgramArguments": program,
@@ -392,10 +402,8 @@ def install_launch_agent(config: dict[str, Any], config_path: str) -> Path:
         "StandardOutPath": str(logs_dir / "launchd.out.log"),
         "StandardErrorPath": str(logs_dir / "launchd.err.log"),
     }
-    if schedule.get("mode") == "daily_times":
-        payload["StartCalendarInterval"] = [_parse_launch_time(value) for value in schedule.get("times", [])]
-        if not payload["StartCalendarInterval"]:
-            payload["StartCalendarInterval"] = [{"Hour": 8, "Minute": 0}]
+    if use_scheduler_wrapper:
+        payload["StartInterval"] = int(schedule.get("poll_interval_seconds", 300))
     elif schedule.get("mode") == "daily":
         payload["StartCalendarInterval"] = {
             "Hour": int(schedule.get("hour", 8)),
