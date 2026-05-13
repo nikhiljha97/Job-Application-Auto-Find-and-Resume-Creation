@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -46,12 +47,7 @@ class LinkedInScanner:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         self._clear_stale_profile_locks()
         with sync_playwright() as playwright:
-            context = playwright.chromium.launch_persistent_context(
-                str(self.profile_dir),
-                headless=headless,
-                viewport={"width": 1440, "height": 1100},
-                slow_mo=60,
-            )
+            context = self._launch_context(playwright, headless)
             page = context.pages[0] if context.pages else context.new_page()
             if use_ui_flow:
                 self._open_search_with_filters(page, headless=headless)
@@ -162,6 +158,35 @@ class LinkedInScanner:
 
         return list(jobs.values())
 
+    def _launch_context(self, playwright: Any, headless: bool) -> Any:
+        try:
+            return self._launch_persistent_context(playwright, headless)
+        except Exception as exc:
+            if not self._looks_like_profile_cache_error(exc):
+                raise
+            print("Chromium profile cache/state looked stale; cleaning artifacts and retrying once.")
+            self._clear_profile_cache_artifacts()
+            self._clear_stale_profile_locks()
+            return self._launch_persistent_context(playwright, headless)
+
+    def _launch_persistent_context(self, playwright: Any, headless: bool) -> Any:
+        return playwright.chromium.launch_persistent_context(
+            str(self.profile_dir),
+            headless=headless,
+            viewport={"width": 1440, "height": 1100},
+            slow_mo=60,
+        )
+
+    def _looks_like_profile_cache_error(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        markers = (
+            "failed to read prefs",
+            "disk cache",
+            "unable to map index file",
+            "target page, context or browser has been closed",
+        )
+        return any(marker in text for marker in markers)
+
     def _wait_for_login_if_needed(self, page: Any, headless: bool) -> None:
         login_markers = ["input#username", "input[name='session_key']", "text=Sign in"]
         needs_login = "login" in page.url.lower()
@@ -196,6 +221,31 @@ class LinkedInScanner:
             try:
                 path.unlink()
                 print(f"Removed stale LinkedIn browser profile lock: {path.name}")
+            except FileNotFoundError:
+                pass
+
+    def _clear_profile_cache_artifacts(self) -> None:
+        artifact_names = (
+            "Local State",
+            "RunningChromeVersion",
+            "GrShaderCache",
+            "ShaderCache",
+            "GraphiteDawnCache",
+            "Default/GPUCache",
+            "Default/Cache",
+            "Default/Code Cache",
+            "Default/DawnCache",
+            "Default/Service Worker/CacheStorage",
+        )
+        for name in artifact_names:
+            artifact = self.profile_dir / name
+            try:
+                if artifact.is_dir() and not artifact.is_symlink():
+                    shutil.rmtree(artifact)
+                    print(f"Removed stale Chromium profile artifact: {name}")
+                else:
+                    artifact.unlink()
+                    print(f"Removed stale Chromium profile artifact: {name}")
             except FileNotFoundError:
                 pass
 
