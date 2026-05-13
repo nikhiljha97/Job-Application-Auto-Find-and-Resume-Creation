@@ -74,7 +74,7 @@ def update_onedrive_docx(config: dict[str, Any], item_id: str, docx_path: str | 
             config,
             "PUT",
             f"{GRAPH_ROOT}/me/drive/items/{item_id}/content",
-            data=path.read_bytes(),
+            data=_read_bytes_with_retries(path),
             headers={"Content-Type": DOCX_MIME},
         )
     except RuntimeError as exc:
@@ -286,10 +286,23 @@ def _upload_file_to_folder(config: dict[str, Any], folder_id: str, filename: str
         config,
         "PUT",
         url,
-        data=path.read_bytes(),
+        data=_read_bytes_with_retries(path),
         headers={"Content-Type": mime_type},
     )
     return response.json()
+
+
+def _read_bytes_with_retries(path: Path) -> bytes:
+    last_exc: OSError | None = None
+    for attempt in range(1, 6):
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            last_exc = exc
+            if attempt == 5:
+                break
+            time.sleep(min(2 ** (attempt - 1), 8))
+    raise last_exc or OSError(f"Could not read {path}")
 
 
 def _locked_docx_backup_name(path: Path) -> str:

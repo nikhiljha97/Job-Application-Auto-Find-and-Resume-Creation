@@ -115,6 +115,7 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
         existing_jobs[job.key()] = job
 
     scores = state.load_scores()
+    _relocate_generated_paths(scores, output_dir, config)
     jobs_to_score = list(existing_jobs.values())
     print(f"Scoring {len(jobs_to_score)} saved jobs against resume/profile bank...")
     for index, job in enumerate(jobs_to_score, start=1):
@@ -292,7 +293,48 @@ def _carry_generated_outputs(previous_score: Any, refreshed_score: Any) -> None:
 
 
 def _valid_file(path: Path) -> bool:
-    return path.exists() and path.stat().st_size > 0
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _relocate_generated_paths(scores: dict[str, Any], output_dir: Path, config: dict[str, Any]) -> None:
+    old_output_dir = (PROJECT_ROOT / "outputs").resolve()
+    current_output_dir = output_dir.resolve()
+    path_fields = ("resume_path", "cover_letter_path", "cold_outreach_path")
+    if old_output_dir == current_output_dir:
+        return
+
+    for score in scores.values():
+        for field in path_fields:
+            value = str(getattr(score, field, "") or "").strip()
+            if not value:
+                continue
+            path = Path(value).expanduser()
+            try:
+                resolved = path.resolve()
+            except OSError:
+                resolved = path
+            if _is_relative_to(resolved, current_output_dir):
+                if not _valid_file(resolved):
+                    setattr(score, field, "")
+                continue
+            if not _is_relative_to(resolved, old_output_dir):
+                if not _valid_file(resolved):
+                    setattr(score, field, "")
+                continue
+            relative = resolved.relative_to(old_output_dir)
+            migrated = current_output_dir / relative
+            setattr(score, field, str(migrated) if _valid_file(migrated) else "")
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 def sample_jobs(source_url: str) -> list[JobPosting]:
