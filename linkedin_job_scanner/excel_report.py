@@ -224,7 +224,7 @@ def read_excel_application_status(path: str | Path) -> dict[str, dict[str, str]]
         return {}
 
     try:
-        wb = load_workbook(workbook_path, read_only=True, data_only=True)
+        wb = load_workbook(workbook_path, read_only=False, data_only=True, keep_links=False)
     except Exception:
         return {}
     if "Ranked Jobs" not in wb.sheetnames:
