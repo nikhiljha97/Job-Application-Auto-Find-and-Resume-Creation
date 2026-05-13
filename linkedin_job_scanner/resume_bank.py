@@ -75,18 +75,15 @@ class ResumeBank:
 
         profile_text = "\n".join(_dedupe_paragraphs(p for doc in docs for p in doc.paragraphs))
         keywords = extract_keywords(profile_text, DEFAULT_SKILL_PHRASES, top_n=120)
-        cache_path.write_text(
-            json.dumps(
-                {
-                    "signature": signature,
-                    "vocabulary_signature": vocabulary_signature,
-                    "documents": [doc.to_dict() for doc in docs],
-                    "profile_text": profile_text,
-                    "profile_keywords": keywords,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
+        _write_cache(
+            cache_path,
+            {
+                "signature": signature,
+                "vocabulary_signature": vocabulary_signature,
+                "documents": [doc.to_dict() for doc in docs],
+                "profile_text": profile_text,
+                "profile_keywords": keywords,
+            },
         )
         return cls(root=root_path, documents=docs, profile_text=profile_text, profile_keywords=keywords)
 
@@ -198,3 +195,16 @@ def _load_cache(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _write_cache(path: Path, payload: dict[str, Any]) -> None:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
+    except OSError as exc:
+        print(f"Resume profile cache write skipped: {exc}")
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
