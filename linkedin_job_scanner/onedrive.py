@@ -152,7 +152,19 @@ def download_excel_from_onedrive(config: dict[str, Any], excel_path: str | Path)
 
     response = _request(config, "GET", f"{GRAPH_ROOT}/me/drive/items/{item['id']}/content", allow_redirects=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(response.content)
+    tmp_path = output_path.with_name(f".{output_path.stem}.download{output_path.suffix}")
+    try:
+        tmp_path.write_bytes(response.content)
+        tmp_path.replace(output_path)
+    except OSError as exc:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        print(
+            f"OneDrive Excel download skipped because the local workbook is locked or unavailable: {exc}"
+        )
+        return False
     return True
 
 

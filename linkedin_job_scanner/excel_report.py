@@ -197,7 +197,19 @@ def write_excel_report(
             raw_ws.cell(row=row, column=raw_url_col).hyperlink = raw_ws.cell(row=row, column=raw_url_col).value
             raw_ws.cell(row=row, column=raw_url_col).style = "Hyperlink"
 
-    wb.save(output)
+    tmp_output = output.with_name(f".{output.stem}.tmp{output.suffix}")
+    try:
+        wb.save(tmp_output)
+        tmp_output.replace(output)
+    except OSError as exc:
+        try:
+            tmp_output.unlink(missing_ok=True)
+        except OSError:
+            pass
+        print(
+            f"Excel workbook is locked or unavailable; keeping existing workbook unchanged. "
+            f"The next run will retry: {exc}"
+        )
     return str(output)
 
 
