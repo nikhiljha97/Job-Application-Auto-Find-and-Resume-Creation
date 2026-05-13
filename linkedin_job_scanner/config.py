@@ -10,7 +10,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "search_url": "",
-    "search_query": "strategy OR insight OR insights OR Analyst",
+    "search_query": (
+        'strategy OR insight OR insights OR analyst OR analytics OR "data analyst" OR '
+        '"data analytic" OR "junior analyst" OR "entry analyst" OR "entry level analyst"'
+    ),
     "linkedin_location": "Canada",
     "resume_root": "..",
     "output_dir": "outputs",
@@ -23,7 +26,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "headless": False,
     "launch_agent_headless": True,
     "target_locations": ["Toronto", "Mississauga", "Hamilton", "Ontario", "Canada", "Remote", "Hybrid"],
-    "target_role_keywords": ["strategy", "insight", "insights", "analytics", "analyst", "business intelligence"],
+    "target_role_keywords": [
+        "strategy",
+        "insight",
+        "insights",
+        "analytics",
+        "analytic",
+        "analyst",
+        "data analyst",
+        "data analytics",
+        "data analytic",
+        "junior analyst",
+        "entry analyst",
+        "entry level analyst",
+        "business intelligence",
+    ],
+    "junior_gate_terms": ["junior", "jr", "jr."],
+    "junior_required_terms": ["analyst", "analytics", "analytic", "data", "insight", "insights"],
     "seniority_keywords_to_penalize": ["director", "vp", "vice president", "head of", "principal", "staff"],
     "preferred_resume_templates": [],
     "exclude_resume_name_terms": ["coverletter", "cover letter", "statement of purpose", "~$"],

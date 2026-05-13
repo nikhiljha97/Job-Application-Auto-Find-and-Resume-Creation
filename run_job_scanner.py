@@ -13,6 +13,7 @@ from linkedin_job_scanner.excel_report import read_excel_application_status, wri
 from linkedin_job_scanner.google_drive import google_drive_ready, upload_docx_as_google_doc
 from linkedin_job_scanner.google_sheets import sync_google_sheet
 from linkedin_job_scanner.google_sheets import download_trusted_google_resume_sources
+from linkedin_job_scanner.job_filters import is_actionable_job
 from linkedin_job_scanner.linkedin import LinkedInScanner
 from linkedin_job_scanner.models import JobPosting, applicant_sort_value
 from linkedin_job_scanner.notifications import notify_after_run
@@ -131,7 +132,7 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
             job
             for job in existing_jobs.values()
             if scores[job.key()].overall_score >= min_score
-            and job.accepting_applications
+            and is_actionable_job(job, config)
         ],
         key=lambda item: (applicant_sort_value(item), -scores[item.key()].overall_score),
     )
@@ -197,7 +198,7 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
 
     state.save_jobs(existing_jobs)
     state.save_scores(scores)
-    write_excel_report(existing_jobs.values(), scores, excel_path, min_score, application_status)
+    write_excel_report(existing_jobs.values(), scores, excel_path, min_score, application_status, config)
     if one_ready:
         try:
             excel_id, excel_url = upload_excel_to_onedrive(config, excel_path)
@@ -211,7 +212,7 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
             job
             for job in scanned_jobs
             if job.key() in scores
-            and job.accepting_applications
+            and is_actionable_job(job, config)
             and scores[job.key()].overall_score >= min_score
             and job.key() not in existing_keys
             and (not bool(config.get("notify_only_new_jobs", True)) or job.key() not in notified_keys)
@@ -230,7 +231,11 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
         print(f"Notification failed: {exc}", file=sys.stderr)
 
     notified_keys.update(job.key() for job in new_matching_jobs)
-    notified_keys.update(job.key() for job in scanned_jobs if job.key() in scores and scores[job.key()].overall_score >= min_score)
+    notified_keys.update(
+        job.key()
+        for job in scanned_jobs
+        if job.key() in scores and scores[job.key()].overall_score >= min_score and is_actionable_job(job, config)
+    )
     state.save_notified_keys(notified_keys)
 
     print(f"Jobs shown with score >= {min_score}: {len(ranked_jobs)}")

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
+from .job_filters import is_actionable_job
 from .models import JobPosting, ScoreResult, applicant_sort_value
 
 
@@ -72,6 +73,7 @@ def write_excel_report(
     output_path: str | Path,
     min_score: float,
     application_status: dict[str, dict[str, str]] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> str:
     try:
         from openpyxl import Workbook
@@ -92,7 +94,7 @@ def write_excel_report(
             for job in jobs
             if job.key() in scores
             and scores[job.key()].overall_score >= min_score
-            and job.accepting_applications
+            and is_actionable_job(job, config or {})
         ),
         key=lambda item: (applicant_sort_value(item), -scores[item.key()].overall_score),
     )
