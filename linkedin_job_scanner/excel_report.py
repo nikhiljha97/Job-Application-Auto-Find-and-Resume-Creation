@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
+from .experience_requirements import find_experience_requirement, requirement_label
 from .job_filters import is_actionable_job
 from .models import JobPosting, ScoreResult, applicant_sort_value
 
@@ -63,6 +64,22 @@ RAW_HEADERS = [
     "Application Status",
     "URL",
     "Source URL",
+    "Scraped At",
+    "Description Preview",
+]
+
+EXCLUDED_HEADERS = [
+    "Reason",
+    "Job ID",
+    "Title",
+    "Company",
+    "Location",
+    "Required Experience",
+    "Experience Phrase",
+    "Application Status",
+    "Applicants",
+    "Applicant Count Text",
+    "URL",
     "Scraped At",
     "Description Preview",
 ]
@@ -186,8 +203,35 @@ def write_excel_report(
             ]
         )
 
+    excluded_ws = wb.create_sheet("Excluded Jobs")
+    excluded_ws.append(EXCLUDED_HEADERS)
+    excluded_jobs = sorted(
+        [job for job in jobs if _exclusion_reason(job, cfg)],
+        key=_scraped_at_sort_key,
+    )
+    for job in excluded_jobs:
+        requirement = find_experience_requirement(job.full_text())
+        excluded_ws.append(
+            [
+                _exclusion_reason(job, cfg),
+                job.job_id,
+                job.title,
+                job.company,
+                job.location,
+                requirement_label(requirement),
+                requirement.phrase if requirement else "",
+                job.application_status,
+                job.applicant_count,
+                job.applicant_count_text,
+                job.url,
+                job.scraped_at,
+                job.description[:1200],
+            ]
+        )
+
     _style_sheet(ws, RANKED_HEADERS, Table, TableStyleInfo, ColorScaleRule, Font, PatternFill, Alignment, get_column_letter)
     _style_sheet(raw_ws, RAW_HEADERS, Table, TableStyleInfo, ColorScaleRule, Font, PatternFill, Alignment, get_column_letter)
+    _style_sheet(excluded_ws, EXCLUDED_HEADERS, Table, TableStyleInfo, ColorScaleRule, Font, PatternFill, Alignment, get_column_letter)
     _style_run_header_rows(ws, ranked_run_rows, Font, PatternFill, Alignment)
     _style_run_header_rows(raw_ws, raw_run_rows, Font, PatternFill, Alignment)
     _add_ranked_dropdowns(ws, DataValidation)
@@ -218,6 +262,13 @@ def write_excel_report(
         if raw_url_col:
             raw_ws.cell(row=row, column=raw_url_col).hyperlink = raw_ws.cell(row=row, column=raw_url_col).value
             raw_ws.cell(row=row, column=raw_url_col).style = "Hyperlink"
+
+    excluded_header_cols = {str(cell.value): cell.column for cell in excluded_ws[1] if cell.value}
+    excluded_url_col = excluded_header_cols.get("URL")
+    for row in range(2, excluded_ws.max_row + 1):
+        if excluded_url_col and excluded_ws.cell(row=row, column=excluded_url_col).value:
+            excluded_ws.cell(row=row, column=excluded_url_col).hyperlink = excluded_ws.cell(row=row, column=excluded_url_col).value
+            excluded_ws.cell(row=row, column=excluded_url_col).style = "Hyperlink"
 
     tmp_output = output.with_name(f".{output.stem}.tmp{output.suffix}")
     try:
@@ -281,7 +332,26 @@ def read_excel_application_status(path: str | Path) -> dict[str, dict[str, str]]
 def _include_in_excel(job: JobPosting, config: dict[str, Any]) -> bool:
     if bool(config.get("excel_hide_closed_jobs", True)) and not job.accepting_applications:
         return False
+    if _exceeds_required_experience(job, config):
+        return False
     return True
+
+
+def _exclusion_reason(job: JobPosting, config: dict[str, Any]) -> str:
+    if bool(config.get("excel_hide_closed_jobs", True)) and not job.accepting_applications:
+        return "No longer accepting applications"
+    if _exceeds_required_experience(job, config):
+        requirement = find_experience_requirement(job.full_text())
+        return f"Requires {requirement_label(requirement)} experience"
+    return ""
+
+
+def _exceeds_required_experience(job: JobPosting, config: dict[str, Any]) -> bool:
+    requirement = find_experience_requirement(job.full_text())
+    if not requirement:
+        return False
+    max_allowed = float(config.get("max_required_experience_years", 5.99))
+    return requirement.minimum_years > max_allowed
 
 
 def _ranked_sort_key(job: JobPosting, scores: dict[str, ScoreResult], config: dict[str, Any]) -> tuple[Any, ...]:

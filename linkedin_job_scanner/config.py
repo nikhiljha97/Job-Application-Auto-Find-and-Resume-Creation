@@ -49,6 +49,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "resume_bank_use_cache_without_rescan": True,
     "excel_sort_mode": "latest_first",
     "excel_hide_closed_jobs": True,
+    "max_required_experience_years": 5.99,
 }
 
 

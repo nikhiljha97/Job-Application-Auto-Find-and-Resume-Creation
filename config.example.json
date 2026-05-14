@@ -136,5 +136,8 @@
     "statement of purpose",
     "~$"
   ],
-  "candidate_experience_years": 3.9
+  "candidate_experience_years": 3.9,
+  "excel_sort_mode": "latest_first",
+  "excel_hide_closed_jobs": true,
+  "max_required_experience_years": 5.99
 }

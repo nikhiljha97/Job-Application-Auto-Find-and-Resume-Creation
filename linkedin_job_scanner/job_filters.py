@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .experience_requirements import exceeds_experience_limit
 from .models import JobPosting
 from .text_utils import normalize_text, phrase_in_text
 
@@ -21,6 +22,8 @@ def is_actionable_job(job: JobPosting, config: dict[str, Any]) -> bool:
     """Return whether a job should be ranked, notified, and used for docs."""
 
     if not job.accepting_applications:
+        return False
+    if exceeds_experience_limit(job.full_text(), float(config.get("max_required_experience_years", 5.99))):
         return False
     return _passes_junior_gate(job, config)
 
