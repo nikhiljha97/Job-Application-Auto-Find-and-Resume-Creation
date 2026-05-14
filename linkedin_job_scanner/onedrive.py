@@ -15,6 +15,7 @@ from .config import PROJECT_ROOT, resolve_path
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_PATH_LOOKUP_CACHE: dict[str, dict[str, Any]] = {}
 DEFAULT_SCOPES = ["Files.ReadWrite", "User.Read"]
 TRANSIENT_ERROR_MARKERS = (
     "Failed to resolve",
@@ -268,12 +269,26 @@ def _ensure_folder_path(config: dict[str, Any], folder_path: str) -> str:
 
 
 def _get_item_by_path(config: dict[str, Any], path: str) -> dict[str, Any] | None:
-    encoded = quote(path.strip("/"), safe="/")
-    response = _request(config, "GET", f"{GRAPH_ROOT}/me/drive/root:/{encoded}", raise_for_status=False)
+    normalized_path = path.strip("/")
+    if not normalized_path:
+        return _json_request(config, "GET", f"{GRAPH_ROOT}/me/drive/root")
+    if normalized_path in _PATH_LOOKUP_CACHE:
+        return _PATH_LOOKUP_CACHE[normalized_path]
+
+    encoded = quote(normalized_path, safe="/")
+    response = _request(config, "GET", f"{GRAPH_ROOT}/me/drive/root:/{encoded}:", raise_for_status=False)
     if response.status_code == 404:
         return None
-    response.raise_for_status()
-    return response.json()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise RuntimeError(
+            f"Microsoft Graph path lookup failed for {normalized_path}: "
+            f"{response.status_code} {response.text}"
+        ) from exc
+    item = response.json()
+    _PATH_LOOKUP_CACHE[normalized_path] = item
+    return item
 
 
 def _upload_file_to_folder(config: dict[str, Any], folder_id: str, filename: str, path: Path, mime_type: str) -> dict[str, Any]:
