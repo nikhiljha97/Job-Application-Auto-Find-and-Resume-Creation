@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -106,7 +106,16 @@ def write_excel_report(
     ws = wb.active
     ws.title = "Ranked Jobs"
     ws.append(RANKED_HEADERS)
-    for rank, job in enumerate(ranked, start=1):
+    ranked_run_rows: list[int] = []
+    current_run = ""
+    rank = 0
+    for job in ranked:
+        run_label = _run_label(job, cfg)
+        if run_label != current_run:
+            current_run = run_label
+            _append_run_header(ws, run_label, len(RANKED_HEADERS))
+            ranked_run_rows.append(ws.max_row)
+        rank += 1
         score = scores[job.key()]
         preserved = (application_status or {}).get(job.key(), {})
         row = [
@@ -152,8 +161,15 @@ def write_excel_report(
 
     raw_ws = wb.create_sheet("Raw Jobs")
     raw_ws.append(RAW_HEADERS)
+    raw_run_rows: list[int] = []
+    current_raw_run = ""
     raw_jobs = sorted(visible_jobs, key=_scraped_at_sort_key)
     for job in raw_jobs:
+        run_label = _run_label(job, cfg)
+        if run_label != current_raw_run:
+            current_raw_run = run_label
+            _append_run_header(raw_ws, run_label, len(RAW_HEADERS))
+            raw_run_rows.append(raw_ws.max_row)
         raw_ws.append(
             [
                 job.job_id,
@@ -172,6 +188,8 @@ def write_excel_report(
 
     _style_sheet(ws, RANKED_HEADERS, Table, TableStyleInfo, ColorScaleRule, Font, PatternFill, Alignment, get_column_letter)
     _style_sheet(raw_ws, RAW_HEADERS, Table, TableStyleInfo, ColorScaleRule, Font, PatternFill, Alignment, get_column_letter)
+    _style_run_header_rows(ws, ranked_run_rows, Font, PatternFill, Alignment)
+    _style_run_header_rows(raw_ws, raw_run_rows, Font, PatternFill, Alignment)
     _add_ranked_dropdowns(ws, DataValidation)
 
     for row in range(2, ws.max_row + 1):
@@ -283,6 +301,60 @@ def _scraped_at_sort_key(job: JobPosting) -> float:
         return 0.0
 
 
+def _append_run_header(ws: Any, label: str, column_count: int) -> None:
+    ws.append([label, *[""] * (column_count - 1)])
+
+
+def _run_label(job: JobPosting, config: dict[str, Any]) -> str:
+    run_time = _run_bucket(job, config)
+    display_time = run_time.strftime("%B %-d, %Y %-I:%M %p %Z")
+    return f"JOBS based on Latest Run as of -- {display_time}"
+
+
+def _run_bucket(job: JobPosting, config: dict[str, Any]) -> datetime:
+    scraped_at = _parse_scraped_at(job.scraped_at)
+    schedule = config.get("launch_schedule", {})
+    if schedule.get("mode") != "daily_times":
+        return scraped_at.replace(minute=0, second=0, microsecond=0)
+    times = sorted(_parse_launch_time_value(value) for value in schedule.get("times", []))
+    if not times:
+        return scraped_at.replace(minute=0, second=0, microsecond=0)
+
+    candidates = [
+        scraped_at.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        for hour, minute in times
+    ]
+    prior = [candidate for candidate in candidates if candidate <= scraped_at]
+    if prior:
+        return max(prior)
+
+    previous_hour, previous_minute = times[-1]
+    return (scraped_at - timedelta(days=1)).replace(
+        hour=previous_hour,
+        minute=previous_minute,
+        second=0,
+        microsecond=0,
+    )
+
+
+def _parse_scraped_at(value: str) -> datetime:
+    text = str(value or "").strip()
+    if text:
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return parsed.astimezone()
+        except ValueError:
+            pass
+    return datetime.now().astimezone()
+
+
+def _parse_launch_time_value(value: Any) -> tuple[int, int]:
+    if isinstance(value, dict):
+        return int(value.get("hour", 8)), int(value.get("minute", 0))
+    hour_text, _, minute_text = str(value).partition(":")
+    return int(hour_text), int(minute_text or 0)
+
+
 def _style_sheet(ws, headers, Table, TableStyleInfo, ColorScaleRule, Font, PatternFill, Alignment, get_column_letter) -> None:
     header_fill = PatternFill("solid", fgColor="1F4E78")
     header_font = Font(color="FFFFFF", bold=True)
@@ -334,6 +406,17 @@ def _style_sheet(ws, headers, Table, TableStyleInfo, ColorScaleRule, Font, Patte
             f"D2:D{ws.max_row}",
             ColorScaleRule(start_type="num", start_value=50, start_color="F8696B", mid_type="num", mid_value=75, mid_color="FFEB84", end_type="num", end_value=100, end_color="63BE7B"),
         )
+
+
+def _style_run_header_rows(ws: Any, row_numbers: list[int], Font: Any, PatternFill: Any, Alignment: Any) -> None:
+    fill = PatternFill("solid", fgColor="305496")
+    font = Font(color="FFFFFF", bold=True, size=12)
+    for row_number in row_numbers:
+        ws.row_dimensions[row_number].height = 24
+        for cell in ws[row_number]:
+            cell.fill = fill
+            cell.font = font
+            cell.alignment = Alignment(wrap_text=True, vertical="center")
 
 
 def _add_ranked_dropdowns(ws: Any, DataValidation: Any) -> None:
