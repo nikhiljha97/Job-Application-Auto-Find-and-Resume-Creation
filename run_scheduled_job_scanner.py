@@ -15,17 +15,20 @@ from linkedin_job_scanner.file_io import read_text_with_retries, write_text_atom
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reliably run due job-scanner schedule slots.")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config.json"), help="Path to config.json")
-    parser.add_argument("--window-minutes", type=int, default=12, help="Run a slot within this many minutes after its time.")
+    parser.add_argument("--window-minutes", type=int, default=None, help="Run a slot within this many minutes after its time.")
     args = parser.parse_args()
 
     config = load_config(args.config)
+    window_minutes = args.window_minutes
+    if window_minutes is None:
+        window_minutes = int(config.get("schedule_window_minutes", 90))
     output_dir = Path(config["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
     scheduler_state_path = output_dir / "data" / "schedule_runs.json"
     scheduler_state_path.parent.mkdir(parents=True, exist_ok=True)
 
     now = datetime.now().astimezone()
-    due_slot = _due_slot(config, now, max(1, args.window_minutes))
+    due_slot = _due_slot(config, now, max(1, window_minutes))
     if not due_slot:
         print(f"No scheduled scan due at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}.")
         return 0

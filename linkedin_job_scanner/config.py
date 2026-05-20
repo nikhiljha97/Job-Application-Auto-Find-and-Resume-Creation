@@ -25,6 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "min_score": 6.0,
     "max_resumes_per_run": 25,
     "hourly_interval_minutes": 60,
+    "schedule_window_minutes": 90,
     "headless": False,
     "launch_agent_headless": True,
     "target_locations": ["Toronto", "Mississauga", "Hamilton", "Ontario", "Canada", "Remote", "Hybrid"],
