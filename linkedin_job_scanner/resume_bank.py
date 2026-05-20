@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .file_io import read_text_with_retries, write_text_atomic_with_retries
 from .models import ResumeDocument
 from .text_utils import DEFAULT_SKILL_PHRASES, cosine_similarity, extract_keywords, normalize_text, phrase_in_text
 
@@ -192,19 +193,13 @@ def _load_cache(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(read_text_with_retries(path))
     except Exception:
         return None
 
 
 def _write_cache(path: Path, payload: dict[str, Any]) -> None:
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
-        tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp_path.replace(path)
+        write_text_atomic_with_retries(path, json.dumps(payload, indent=2))
     except OSError as exc:
         print(f"Resume profile cache write skipped: {exc}")
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass

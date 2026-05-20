@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .file_io import read_text_with_retries
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,8 +60,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     if not path.exists():
         config = DEFAULT_CONFIG.copy()
     else:
-        with path.open("r", encoding="utf-8") as f:
-            user_config = json.load(f)
+        user_config = json.loads(read_text_with_retries(path))
         config = {**DEFAULT_CONFIG, **user_config}
 
     config["_config_path"] = str(path.resolve())

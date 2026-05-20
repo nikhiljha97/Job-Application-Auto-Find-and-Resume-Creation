@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from linkedin_job_scanner.config import PROJECT_ROOT, load_config
+from linkedin_job_scanner.file_io import read_text_with_retries, write_text_atomic_with_retries
 
 
 def main() -> int:
@@ -85,15 +86,13 @@ def _load_json(path: Path, default: Any) -> Any:
     if not path.exists():
         return default
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(read_text_with_retries(path))
     except Exception:
         return default
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    tmp_path = path.with_name(f".{path.stem}.tmp{path.suffix}")
-    tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    tmp_path.replace(path)
+    write_text_atomic_with_retries(path, json.dumps(payload, indent=2))
 
 
 if __name__ == "__main__":

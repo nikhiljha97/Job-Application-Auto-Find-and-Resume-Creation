@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import Any
 
+from .file_io import read_text_with_retries, write_text_atomic_with_retries
 from .models import JobPosting, ScoreResult
 
 
@@ -46,28 +46,10 @@ def _load_json(path: Path, default: Any) -> Any:
     if not path.exists():
         return default
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(read_text_with_retries(path))
     except Exception:
         return default
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.stem}.tmp{path.suffix}")
-    text = json.dumps(payload, indent=2)
-    last_exc: OSError | None = None
-    for attempt in range(1, 6):
-        try:
-            tmp_path.write_text(text, encoding="utf-8")
-            tmp_path.replace(path)
-            return
-        except OSError as exc:
-            last_exc = exc
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            if attempt == 5:
-                break
-            time.sleep(min(2 ** (attempt - 1), 8))
-    raise last_exc or OSError(f"Could not write {path}")
+    write_text_atomic_with_retries(path, json.dumps(payload, indent=2))

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import PROJECT_ROOT, resolve_path
+from .file_io import read_text_with_retries
 
 
 def load_env_file(config: dict[str, Any]) -> None:
@@ -14,7 +15,7 @@ def load_env_file(config: dict[str, Any]) -> None:
     path = resolve_path(env_file, PROJECT_ROOT)
     if not path.exists():
         return
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in read_text_with_retries(path).splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
