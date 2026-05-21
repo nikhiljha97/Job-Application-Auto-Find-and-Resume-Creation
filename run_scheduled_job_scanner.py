@@ -35,7 +35,7 @@ def main() -> int:
 
     state = _load_json(scheduler_state_path, {})
     run_key = f"{now.date().isoformat()} {due_slot}"
-    if state.get("last_started") == run_key or run_key in set(state.get("completed", [])):
+    if run_key in set(state.get("completed", [])):
         print(f"Scheduled scan already handled for {run_key}.")
         return 0
 

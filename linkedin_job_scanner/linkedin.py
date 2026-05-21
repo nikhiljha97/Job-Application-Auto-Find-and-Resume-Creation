@@ -317,17 +317,27 @@ class LinkedInScanner:
         page.wait_for_timeout(wait_ms)
 
         print(f"Searching LinkedIn for: {search_query}")
+        if bool(self.config.get("apply_filters_by_url", True)):
+            try:
+                self._fill_search_box(page, search_query)
+                if location:
+                    print(f"Setting LinkedIn location to: {location}")
+                    self._fill_location_box(page, location)
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(wait_ms)
+            except RuntimeError as exc:
+                print(f"LinkedIn search box unavailable; using direct filtered search URL instead: {exc}")
+            print("Applying LinkedIn filters by URL: Last 24 hours, employment types except Internship, Entry-level + Manager")
+            self._safe_goto(page, build_filtered_search_url(search_query, self.config), timeout=30_000)
+            page.wait_for_timeout(wait_ms)
+            return
+
         self._fill_search_box(page, search_query)
         if location:
             print(f"Setting LinkedIn location to: {location}")
             self._fill_location_box(page, location)
         page.keyboard.press("Enter")
         page.wait_for_timeout(wait_ms)
-        if bool(self.config.get("apply_filters_by_url", True)):
-            print("Applying LinkedIn filters by URL: Last 24 hours, employment types except Internship, Entry-level + Manager")
-            self._safe_goto(page, build_filtered_search_url(search_query, self.config), timeout=30_000)
-            page.wait_for_timeout(wait_ms)
-            return
 
         if not self._has_filter_button(page, "Date posted"):
             self._safe_goto(page, build_search_url(search_query, location), timeout=30_000)
