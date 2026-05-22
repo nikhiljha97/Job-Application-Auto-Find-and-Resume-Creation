@@ -403,7 +403,18 @@ class LinkedInScanner:
                 page.goto(url, wait_until="domcontentloaded", timeout=timeout)
                 return True
             except Exception as exc:
-                if "Timeout" not in type(exc).__name__ and "Timeout" not in str(exc):
+                message = str(exc)
+                if "interrupted by another navigation" in message:
+                    print(f"LinkedIn navigation was superseded by another navigation; continuing with current page state: {url}")
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=5_000)
+                    except Exception:
+                        try:
+                            page.wait_for_timeout(3_000)
+                        except Exception:
+                            pass
+                    return True
+                if "Timeout" not in type(exc).__name__ and "Timeout" not in message:
                     raise
                 print(f"LinkedIn navigation timed out; continuing with current page state ({attempt + 1}/{retries + 1}): {url}")
                 try:

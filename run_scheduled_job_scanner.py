@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import subprocess
 import sys
@@ -26,6 +27,13 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     scheduler_state_path = output_dir / "data" / "schedule_runs.json"
     scheduler_state_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = output_dir / "data" / "schedule.lock"
+    lock_file = lock_path.open("w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("Another scheduled scanner process is already running; skipping this tick.")
+        return 0
 
     now = datetime.now().astimezone()
     state = _load_json(scheduler_state_path, {})
