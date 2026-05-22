@@ -141,6 +141,18 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
     if create_resumes:
         created = 0
         max_resumes = int(config.get("max_resumes_per_run", 25))
+        if bool(config.get("revalidate_jobs_before_docs", True)) and ranked_jobs:
+            recheck_jobs = ranked_jobs[:max_resumes]
+            print(f"Rechecking Apply button status for top {len(recheck_jobs)} ranked jobs before document creation.")
+            try:
+                LinkedInScanner(config, known_job_keys=existing_keys).revalidate_application_status(recheck_jobs)
+                ranked_jobs = [
+                    job
+                    for job in ranked_jobs
+                    if is_actionable_job(job, config)
+                ]
+            except Exception as exc:
+                print(f"Application status recheck failed; continuing with existing scan data: {exc}", file=sys.stderr)
         print(f"Preparing resumes/companion docs for up to {max_resumes} ranked jobs.")
         for job in ranked_jobs:
             score = scores[job.key()]

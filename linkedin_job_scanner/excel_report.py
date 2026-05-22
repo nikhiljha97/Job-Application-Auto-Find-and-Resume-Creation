@@ -339,7 +339,8 @@ def _include_in_excel(job: JobPosting, config: dict[str, Any]) -> bool:
 
 def _exclusion_reason(job: JobPosting, config: dict[str, Any]) -> str:
     if bool(config.get("excel_hide_closed_jobs", True)) and not job.accepting_applications:
-        return "No longer accepting applications"
+        status = (job.application_status or "").strip()
+        return status if status and status != "Unknown" else "Not accepting applications"
     if _exceeds_required_experience(job, config):
         requirement = find_experience_requirement(job.full_text())
         return f"Requires {requirement_label(requirement)} experience"

@@ -158,6 +158,45 @@ class LinkedInScanner:
 
         return list(jobs.values())
 
+    def revalidate_application_status(self, jobs: list[JobPosting]) -> None:
+        if not jobs:
+            return
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:
+            raise RuntimeError("Playwright is required for LinkedIn job validation.") from exc
+
+        headless = bool(self.config.get("headless", False))
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
+        self._clear_stale_profile_locks()
+        with sync_playwright() as playwright:
+            context = self._launch_context(playwright, headless)
+            page = context.pages[0] if context.pages else context.new_page()
+            for index, job in enumerate(jobs, start=1):
+                try:
+                    self._safe_goto(page, job.url, timeout=20_000, retries=1)
+                    self._wait_for_login_if_needed(page, headless=headless)
+                    page.wait_for_timeout(1_200)
+                    details = self._extract_details(page)
+                except Exception as exc:
+                    print(f"Application status recheck skipped for {job.key()}: {exc}")
+                    continue
+
+                status = clean_text(str(details.get("application_status", "")))
+                job.accepting_applications = bool(details.get("accepting_applications", False))
+                job.application_status = status or (
+                    "Accepting Applications" if job.accepting_applications else "No Apply Button Detected"
+                )
+                applicant_count = optional_int(details.get("applicant_count"))
+                applicant_count_text = clean_text(str(details.get("applicant_count_text", "")))
+                if applicant_count is not None:
+                    job.applicant_count = applicant_count
+                if applicant_count_text:
+                    job.applicant_count_text = applicant_count_text
+                if index % 10 == 0 or index == len(jobs):
+                    print(f"Rechecked application status for {index}/{len(jobs)} ranked jobs.")
+            context.close()
+
     def _launch_context(self, playwright: Any, headless: bool) -> Any:
         try:
             return self._launch_persistent_context(playwright, headless)
@@ -851,11 +890,19 @@ DETAIL_EVALUATE_JS = """
   const topCard = document.querySelector(".jobs-unified-top-card, .job-details-jobs-unified-top-card");
   const topCardText = topCard ? topCard.innerText || "" : "";
   const actionNodes = Array.from(document.querySelectorAll("button, a"));
-  const easyApply = !!actionNodes.find((node) => /easy apply/i.test(node.innerText || ""));
+  const actionLabel = (node) => [
+    node.innerText || "",
+    node.getAttribute("aria-label") || "",
+    node.getAttribute("title") || "",
+    node.getAttribute("data-control-name") || ""
+  ].join(" ").replace(/\\s+/g, " ").trim();
+  const isDisabled = (node) => node.disabled || node.getAttribute("aria-disabled") === "true";
+  const easyApply = !!actionNodes.find((node) => /easy apply/i.test(actionLabel(node)) && !isDisabled(node));
   const hasApplyButton = !!actionNodes.find((node) => {
-    const text = (node.innerText || "").trim();
-    const disabled = node.disabled || node.getAttribute("aria-disabled") === "true";
-    return !disabled && /^(easy apply|apply)$/i.test(text);
+    const label = actionLabel(node);
+    const applyLike = /\\b(easy apply|apply now|apply on company website|apply)\\b/i.test(label);
+    const closedLike = /(no longer accepting|applications? closed|job closed)/i.test(label);
+    return !isDisabled(node) && applyLike && !closedLike;
   });
   const noLongerAccepting = /no longer accepting applications?/i.test(pageText);
   const parseApplicants = (text) => {
@@ -878,7 +925,7 @@ DETAIL_EVALUATE_JS = """
     return null;
   };
   const applicants = parseApplicants(topCardText) || parseApplicants(pageText) || { count: null, text: "" };
-  const acceptingApplications = !noLongerAccepting;
+  const acceptingApplications = !noLongerAccepting && hasApplyButton;
   return {
     title,
     company,
@@ -891,7 +938,7 @@ DETAIL_EVALUATE_JS = """
       ? "No Longer Accepting Applications"
       : hasApplyButton
         ? "Accepting Applications"
-        : "Unknown",
+        : "No Apply Button Detected",
     applicant_count: applicants.count,
     applicant_count_text: applicants.text
   };

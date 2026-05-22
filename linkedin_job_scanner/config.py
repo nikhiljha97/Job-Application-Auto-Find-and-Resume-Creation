@@ -24,6 +24,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "page_size": 25,
     "min_score": 6.0,
     "max_resumes_per_run": 25,
+    "revalidate_jobs_before_docs": True,
     "hourly_interval_minutes": 60,
     "schedule_window_minutes": 90,
     "schedule_catch_up_missed_slots": True,
