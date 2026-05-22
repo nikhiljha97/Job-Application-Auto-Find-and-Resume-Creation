@@ -82,7 +82,7 @@ def _due_slot(config: dict[str, Any], now: datetime, window_minutes: int, state:
     today = now.date().isoformat()
     catch_up_missed = bool(config.get("schedule_catch_up_missed_slots", True))
     max_age_hours = float(config.get("schedule_catch_up_max_age_hours", 16))
-    latest_missed_slot = ""
+    latest_due_slot = ""
     for value in schedule.get("times", []):
         hour, minute = _parse_time(value)
         scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
@@ -90,11 +90,11 @@ def _due_slot(config: dict[str, Any], now: datetime, window_minutes: int, state:
             return f"{hour:02d}:{minute:02d}"
         run_key = f"{today} {hour:02d}:{minute:02d}"
         age = now - scheduled
-        if catch_up_missed and timedelta(0) <= age <= timedelta(hours=max_age_hours) and run_key not in completed:
-            latest_missed_slot = f"{hour:02d}:{minute:02d}"
-    if latest_missed_slot:
-        print(f"Catching up missed scheduled scan for {today} {latest_missed_slot}.")
-        return latest_missed_slot
+        if catch_up_missed and timedelta(0) <= age <= timedelta(hours=max_age_hours):
+            latest_due_slot = f"{hour:02d}:{minute:02d}"
+    if latest_due_slot and f"{today} {latest_due_slot}" not in completed:
+        print(f"Catching up missed scheduled scan for {today} {latest_due_slot}.")
+        return latest_due_slot
     return ""
 
 

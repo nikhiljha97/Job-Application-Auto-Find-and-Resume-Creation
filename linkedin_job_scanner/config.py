@@ -32,6 +32,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "schedule_window_minutes": 90,
     "schedule_catch_up_missed_slots": True,
     "schedule_catch_up_max_age_hours": 16,
+    "wake_monitor_interval_seconds": 60,
+    "wake_monitor_gap_seconds": 180,
+    "wake_monitor_run_at_start": True,
     "headless": False,
     "launch_agent_headless": True,
     "target_locations": ["Toronto", "Mississauga", "Hamilton", "Ontario", "Canada", "Remote", "Hybrid"],
@@ -66,17 +69,20 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     path = Path(config_path) if config_path else PROJECT_ROOT / "config.json"
     if not path.exists():
         config = DEFAULT_CONFIG.copy()
+        config_base = PROJECT_ROOT
     else:
         user_config = json.loads(read_text_with_retries(path))
         config = {**DEFAULT_CONFIG, **user_config}
+        config_base = path.resolve().parent
 
     config["_config_path"] = str(path.resolve())
     config["_project_root"] = str(PROJECT_ROOT)
-    config["resume_root"] = str(resolve_path(config["resume_root"], PROJECT_ROOT))
+    config["_config_base"] = str(config_base)
+    config["resume_root"] = str(resolve_path(config["resume_root"], config_base))
     if config.get("trusted_resume_root"):
-        config["trusted_resume_root"] = str(resolve_path(config["trusted_resume_root"], PROJECT_ROOT))
-    config["output_dir"] = str(resolve_path(config["output_dir"], PROJECT_ROOT))
-    config["linkedin_profile_dir"] = str(resolve_path(config["linkedin_profile_dir"], PROJECT_ROOT))
+        config["trusted_resume_root"] = str(resolve_path(config["trusted_resume_root"], config_base))
+    config["output_dir"] = str(resolve_path(config["output_dir"], config_base))
+    config["linkedin_profile_dir"] = str(resolve_path(config["linkedin_profile_dir"], config_base))
     return config
 
 

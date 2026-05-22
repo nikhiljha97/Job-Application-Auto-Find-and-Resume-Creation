@@ -12,7 +12,7 @@ def load_env_file(config: dict[str, Any]) -> None:
     env_file = str(config.get("env_file", "")).strip()
     if not env_file:
         return
-    path = resolve_path(env_file, PROJECT_ROOT)
+    path = resolve_path(env_file, config.get("_config_base", PROJECT_ROOT))
     if not path.exists():
         return
     for raw_line in read_text_with_retries(path).splitlines():
