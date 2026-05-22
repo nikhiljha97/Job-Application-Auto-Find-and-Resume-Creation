@@ -172,9 +172,10 @@ class LinkedInScanner:
         with sync_playwright() as playwright:
             context = self._launch_context(playwright, headless)
             page = context.pages[0] if context.pages else context.new_page()
+            timeout_ms = int(self.config.get("revalidate_job_timeout_ms", 8_000))
             for index, job in enumerate(jobs, start=1):
                 try:
-                    self._safe_goto(page, job.url, timeout=20_000, retries=1)
+                    self._safe_goto(page, job.url, timeout=timeout_ms, retries=0)
                     self._wait_for_login_if_needed(page, headless=headless)
                     page.wait_for_timeout(1_200)
                     details = self._extract_details(page)

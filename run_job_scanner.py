@@ -110,6 +110,12 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
     else:
         scanned_jobs = LinkedInScanner(config, known_job_keys=existing_keys).scan()
     print(f"Scanned {len(scanned_jobs)} jobs this run.")
+    min_scanned_jobs = int(config.get("min_scanned_jobs_per_run", 1))
+    if not sample and len(scanned_jobs) < min_scanned_jobs:
+        raise RuntimeError(
+            f"LinkedIn scan returned {len(scanned_jobs)} jobs, below minimum {min_scanned_jobs}; "
+            "treating this as a failed scan so the scheduler can retry."
+        )
 
     for job in scanned_jobs:
         existing_jobs[job.key()] = job
@@ -142,10 +148,12 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
         created = 0
         max_resumes = int(config.get("max_resumes_per_run", 25))
         if bool(config.get("revalidate_jobs_before_docs", True)) and ranked_jobs:
-            recheck_jobs = ranked_jobs[:max_resumes]
+            recheck_limit = max(0, int(config.get("revalidate_jobs_before_docs_count", 20)))
+            recheck_jobs = ranked_jobs[: min(max_resumes, recheck_limit)]
             print(f"Rechecking Apply button status for top {len(recheck_jobs)} ranked jobs before document creation.")
             try:
-                LinkedInScanner(config, known_job_keys=existing_keys).revalidate_application_status(recheck_jobs)
+                if recheck_jobs:
+                    LinkedInScanner(config, known_job_keys=existing_keys).revalidate_application_status(recheck_jobs)
                 ranked_jobs = [
                     job
                     for job in ranked_jobs
