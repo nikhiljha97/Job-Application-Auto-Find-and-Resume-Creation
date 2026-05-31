@@ -188,6 +188,7 @@ class LinkedInScanner:
         params["sortBy"] = "DD"
         url = base + urlencode(params)
         self._safe_goto(page, url, timeout=30_000)
+        self._wait_for_login_if_needed(page, headless=headless)
 
     def login_and_save_session(self) -> None:
         """Open a non-headless browser so the user can log in to LinkedIn manually."""
@@ -232,32 +233,101 @@ class LinkedInScanner:
                 print(f"Warning: could not inject saved cookies: {exc}")
         return ctx
 
+    def _wait_for_login_if_needed(self, page: Any, headless: bool) -> None:
+        login_markers = ["input#username", "input[name='session_key']"]
+        needs_login = "login" in page.url.lower() or "authwall" in page.url.lower()
+        for selector in login_markers:
+            try:
+                if page.locator(selector).count() > 0:
+                    needs_login = True
+                    break
+            except Exception:
+                continue
+
+        if not needs_login:
+            return
+
+        # Try re-injecting cookies and reloading before giving up
+        cookies_file = self.profile_dir / "cookies.json"
+        if cookies_file.exists():
+            import json as _json
+            try:
+                page.context.add_cookies(_json.loads(cookies_file.read_text()))
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2000)
+                still_needs_login = "login" in page.url.lower() or "authwall" in page.url.lower()
+                if not still_needs_login:
+                    print("LinkedIn session restored from saved cookies.", flush=True)
+                    return
+            except Exception as exc:
+                print(f"Cookie re-injection failed: {exc}", flush=True)
+
+        if headless or not sys.stdin.isatty():
+            raise RuntimeError(
+                "LinkedIn requires login. Go to the LinkedIn Login page in the Streamlit app "
+                "and save your li_at cookie or use Email & password login."
+            )
+        print("\nLinkedIn login is required in the opened browser window.")
+        print("Sign in manually, finish any security checks, then return here and press Enter.")
+        input("Press Enter after LinkedIn jobs search is visible...")
+
     def _looks_like_profile_cache_error(self, exc: Exception) -> bool:
         text = str(exc).lower()
         markers = (
             "failed to read prefs",
             "disk cache",
             "unable to map index file",
-            "leveldb",
-            "profile",
+            "target page, context or browser has been closed",
         )
-        return any(m in text for m in markers)
-
-    def _clear_profile_cache_artifacts(self) -> None:
-        cache_path = self.profile_dir / "Default" / "Cache"
-        if cache_path.exists():
-            shutil.rmtree(cache_path, ignore_errors=True)
-        for f in self.profile_dir.glob("*.lock"):
-            f.unlink(missing_ok=True)
+        return any(marker in text for marker in markers)
 
     def _clear_stale_profile_locks(self) -> None:
-        for lock in self.profile_dir.glob("**/*.lock"):
+        lock = self.profile_dir / "SingletonLock"
+        if not lock.exists() and not lock.is_symlink():
+            return
+        if lock.is_symlink():
+            target = os.readlink(lock)
+            maybe_pid = target.rsplit("-", 1)[-1]
+            if maybe_pid.isdigit() and _pid_is_running(int(maybe_pid)):
+                return
+        for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            path = self.profile_dir / name
             try:
-                lock.unlink()
-            except OSError:
+                path.unlink()
+                print(f"Removed stale LinkedIn browser profile lock: {path.name}")
+            except FileNotFoundError:
                 pass
-        singleton = self.profile_dir / "SingletonLock"
-        singleton.unlink(missing_ok=True)
+
+    def _clear_profile_cache_artifacts(self) -> None:
+        artifact_names = (
+            "Local State",
+            "RunningChromeVersion",
+            "GrShaderCache",
+            "ShaderCache",
+            "GraphiteDawnCache",
+            "Default/GPUCache",
+            "Default/Cache",
+            "Default/Code Cache",
+            "Default/DawnCache",
+            "Default/Service Worker/CacheStorage",
+        )
+        for name in artifact_names:
+            path = self.profile_dir / name
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            elif path.exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 def normalize_search_url(url: str) -> str:
