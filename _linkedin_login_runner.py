@@ -14,11 +14,10 @@ _PW_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/tmp/ms-playwright")
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _PW_PATH
 
 # Ensure Chromium binary is present.
-# --with-deps is omitted: system deps are declared in packages.txt and installed at build time.
 print("Installing Playwright Chromium binary…", flush=True)
 _install = subprocess.run(
     [sys.executable, "-m", "playwright", "install", "chromium"],
-    capture_output=False,  # let output stream so failures are visible in the log
+    capture_output=False,
     env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": _PW_PATH},
 )
 if _install.returncode != 0:
@@ -80,15 +79,15 @@ with sync_playwright() as p:
     print(f"Password selector found: {password_sel}", flush=True)
 
     if not username_sel or not password_sel:
-        # Print page content snippet for debugging
         content = page.content()
         print(f"Page content snippet: {content[:800]}", flush=True)
         print("LOGIN_FAILED: login form not found — LinkedIn may be showing a CAPTCHA or bot-check page", flush=True)
         sys.exit(1)
 
-    page.fill(username_sel, email)
-    page.fill(password_sel, password)
-    page.click('[type="submit"]')
+    # Use :visible to skip hidden duplicate inputs LinkedIn renders
+    page.locator(f"{username_sel}:visible").first.fill(email)
+    page.locator(f"{password_sel}:visible").first.fill(password)
+    page.locator('[type="submit"]:visible').first.click()
     print("Submitted credentials, waiting…", flush=True)
     page.wait_for_timeout(4000)
 
