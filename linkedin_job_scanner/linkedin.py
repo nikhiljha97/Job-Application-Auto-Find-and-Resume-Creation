@@ -41,7 +41,7 @@ class LinkedInScanner:
         max_pages = int(self.config.get("max_pages", 5))
         page_size = int(self.config.get("page_size", 25))
         headless = bool(self.config.get("headless", False))
-        use_ui_flow = bool(self.config.get("use_linkedin_ui_flow", False))
+        use_ui_flow = bool(self.config.get("use_linkedin_ui_flow", True))
         jobs: dict[str, JobPosting] = {}
 
         self.profile_dir.mkdir(parents=True, exist_ok=True)
