@@ -80,15 +80,15 @@ with sync_playwright() as p:
     print(f"Password selector found: {password_sel}", flush=True)
 
     if not username_sel or not password_sel:
-        # Print page content snippet for debugging
         content = page.content()
         print(f"Page content snippet: {content[:800]}", flush=True)
         print("LOGIN_FAILED: login form not found — LinkedIn may be showing a CAPTCHA or bot-check page", flush=True)
         sys.exit(1)
 
-    page.fill(username_sel, email)
-    page.fill(password_sel, password)
-    page.click('[type="submit"]')
+    # Use :visible to skip hidden duplicate inputs LinkedIn renders
+    page.locator(f"{username_sel}:visible").first.fill(email)
+    page.locator(f"{password_sel}:visible").first.fill(password)
+    page.locator('[type="submit"]:visible').first.click()
     print("Submitted credentials, waiting…", flush=True)
     page.wait_for_timeout(4000)
 
