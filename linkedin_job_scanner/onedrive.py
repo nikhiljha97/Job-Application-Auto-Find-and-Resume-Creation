@@ -35,8 +35,9 @@ def onedrive_ready(config: dict[str, Any]) -> tuple[bool, str]:
     onedrive_config = config.get("onedrive", {})
     if not onedrive_config.get("enabled"):
         return False, "OneDrive integration is disabled."
-    if not str(onedrive_config.get("client_id", "")).strip():
-        return False, "Set onedrive.client_id in config.json."
+    client_id = str(onedrive_config.get("client_id", "")).strip()
+    if not client_id or client_id.startswith("YOUR_"):
+        return False, "Set a real onedrive.client_id in config.json (current value is a placeholder)."
     if not str(onedrive_config.get("tenant_id", "")).strip():
         return False, "Set onedrive.tenant_id in config.json."
     if not str(onedrive_config.get("resume_folder_id", "")).strip() and not str(onedrive_config.get("resume_folder_path", "")).strip():

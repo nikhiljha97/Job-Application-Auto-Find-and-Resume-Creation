@@ -237,8 +237,8 @@ class LinkedInScanner:
         return any(marker in text for marker in markers)
 
     def _wait_for_login_if_needed(self, page: Any, headless: bool) -> None:
-        login_markers = ["input#username", "input[name='session_key']", "text=Sign in"]
-        needs_login = "login" in page.url.lower()
+        login_markers = ["input#username", "input[name='session_key']"]
+        needs_login = "login" in page.url.lower() or "authwall" in page.url.lower()
         for selector in login_markers:
             try:
                 if page.locator(selector).count() > 0:
@@ -246,15 +246,33 @@ class LinkedInScanner:
                     break
             except Exception:
                 continue
-        if needs_login:
-            if headless or not sys.stdin.isatty():
-                raise RuntimeError(
-                    "LinkedIn requires login. Run once from Terminal with the browser visible, sign in, "
-                    "then restart the LaunchAgent."
-                )
-            print("\nLinkedIn login is required in the opened browser window.")
-            print("Sign in manually, finish any security checks, then return here and press Enter.")
-            input("Press Enter after LinkedIn jobs search is visible...")
+
+        if not needs_login:
+            return
+
+        # Try re-injecting cookies and reloading before giving up
+        cookies_file = self.profile_dir / "cookies.json"
+        if cookies_file.exists():
+            import json as _json
+            try:
+                page.context.add_cookies(_json.loads(cookies_file.read_text()))
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2000)
+                still_needs_login = "login" in page.url.lower() or "authwall" in page.url.lower()
+                if not still_needs_login:
+                    print("LinkedIn session restored from saved cookies.", flush=True)
+                    return
+            except Exception as exc:
+                print(f"Cookie re-injection failed: {exc}", flush=True)
+
+        if headless or not sys.stdin.isatty():
+            raise RuntimeError(
+                "LinkedIn requires login. Go to the LinkedIn Login page in the Streamlit app "
+                "and save your li_at cookie or use Email & password login."
+            )
+        print("\nLinkedIn login is required in the opened browser window.")
+        print("Sign in manually, finish any security checks, then return here and press Enter.")
+        input("Press Enter after LinkedIn jobs search is visible...")
 
     def _clear_stale_profile_locks(self) -> None:
         lock = self.profile_dir / "SingletonLock"
