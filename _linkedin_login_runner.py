@@ -88,9 +88,10 @@ with sync_playwright() as p:
     # Use :visible to skip hidden duplicate inputs LinkedIn renders
     page.locator(f"{username_sel}:visible").first.fill(email)
     page.locator(f"{password_sel}:visible").first.fill(password)
-    page.locator('[type="submit"]:visible').first.click()
+    # Press Enter to submit — more reliable than clicking the button
+    page.keyboard.press("Enter")
     print("Submitted credentials, waiting…", flush=True)
-    page.wait_for_timeout(4000)
+    page.wait_for_timeout(5000)
 
     current_url = page.url
     print(f"After login URL: {current_url}", flush=True)
