@@ -2,14 +2,20 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import time
 
+# Force a consistent browser path to avoid user-mismatch on Streamlit Cloud.
+_PW_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/tmp/ms-playwright")
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _PW_PATH
+
 # Ensure Chromium binary is present (Streamlit Cloud doesn't pre-install it).
 subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-               capture_output=True)
+               capture_output=True,
+               env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": _PW_PATH})
 
 from playwright.sync_api import sync_playwright
 

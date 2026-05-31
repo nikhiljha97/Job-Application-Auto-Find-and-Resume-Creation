@@ -12,13 +12,19 @@ from pathlib import Path
 
 import streamlit as st
 
-# Install Playwright browser binary on first cold start (Streamlit Cloud doesn't run
-# `playwright install` automatically, so we do it once here before any browser call).
-_pw_flag = Path(tempfile.gettempdir()) / ".pw_chromium_installed"
+# Force Playwright to use a writable, consistent path for browser binaries.
+# Streamlit Cloud runs as 'adminuser' but the default cache path can resolve to
+# '/home/appuser/.cache/ms-playwright' causing a user-mismatch. Overriding to /tmp fixes it.
+_PW_BROWSERS_PATH = "/tmp/ms-playwright"
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _PW_BROWSERS_PATH
+
+# Install Playwright browser binary on first cold start.
+_pw_flag = Path(tempfile.gettempdir()) / ".pw_chromium_installed_v2"
 if not _pw_flag.exists():
     _result = subprocess.run(
         [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
         capture_output=True, text=True,
+        env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": _PW_BROWSERS_PATH},
     )
     if _result.returncode == 0:
         _pw_flag.write_text("ok")
@@ -152,7 +158,8 @@ def _run_login(runner_script: Path, email: str, password: str, profile_dir: Path
         [sys.executable, "-u", str(runner_script),
          str(creds_file), str(twofa_req), str(twofa_resp), str(profile_dir)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        env={**os.environ, "PYTHONUNBUFFERED": "1",
+             "PLAYWRIGHT_BROWSERS_PATH": _PW_BROWSERS_PATH},
     )
 
     log_area = st.empty()
