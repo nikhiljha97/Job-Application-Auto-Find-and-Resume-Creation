@@ -41,7 +41,7 @@ class LinkedInScanner:
         max_pages = int(self.config.get("max_pages", 5))
         page_size = int(self.config.get("page_size", 25))
         headless = bool(self.config.get("headless", False))
-        use_ui_flow = bool(self.config.get("use_linkedin_ui_flow", False))
+        use_ui_flow = bool(self.config.get("use_linkedin_ui_flow", True))
         jobs: dict[str, JobPosting] = {}
 
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -58,18 +58,20 @@ class LinkedInScanner:
                 if not use_ui_flow:
                     try:
                         self._safe_goto(page, page_url, timeout=30_000)
-                    except Exception as exc:
-                        print(f"  Navigation failed: {exc}")
-                        break
+                    except PlaywrightTimeoutError:
+                        print("Page load timed out; continuing with whatever loaded.")
 
-                job_cards = page.query_selector_all(CARD_SELECTOR)
-                if not job_cards:
+                self._wait_for_login_if_needed(page, headless=headless)
+                self._load_visible_cards(page)
+
+                card_data = self._collect_current_page_results(page)
+                if not card_data:
                     print(f"  No job cards found on page {page_index + 1}; stopping.")
                     break
 
                 new_on_page = 0
-                for card in job_cards:
-                    posting = self._extract_job(card, page)
+                for item in card_data:
+                    posting = self._parse_card_data(item)
                     if posting and posting.key() not in self.known_job_keys and posting.key() not in jobs:
                         jobs[posting.key()] = posting
                         new_on_page += 1
@@ -77,6 +79,12 @@ class LinkedInScanner:
                 print(f"  Found {new_on_page} new jobs on page {page_index + 1} ({len(jobs)} total)")
                 if new_on_page == 0 and page_index > 0:
                     break
+
+                if use_ui_flow:
+                    try:
+                        self._go_to_next_page(page)
+                    except Exception:
+                        break
 
             context.close()
         return list(jobs.values())
@@ -87,64 +95,84 @@ class LinkedInScanner:
         except Exception:
             page.goto(url, timeout=timeout)
 
-    def _extract_job(self, card: Any, page: Any) -> JobPosting | None:
+    def _load_visible_cards(self, page: Any) -> None:
         try:
-            job_id = (
-                card.get_attribute("data-occludable-job-id")
-                or card.get_attribute("data-job-id")
-                or ""
-            )
-            title_el = card.query_selector(
-                ".job-card-list__title, "
-                ".job-card-container__link, "
-                "a[href*='/jobs/view/']"
-            )
-            title = title_el.inner_text().strip() if title_el else ""
-            if not title:
-                return None
-
-            company_el = card.query_selector(
-                ".job-card-container__primary-description, "
-                ".artdeco-entity-lockup__subtitle"
-            )
-            company = company_el.inner_text().strip() if company_el else ""
-
-            location_el = card.query_selector(
-                ".job-card-container__metadata-item, "
-                ".artdeco-entity-lockup__caption"
-            )
-            location = location_el.inner_text().strip() if location_el else ""
-
-            href = title_el.get_attribute("href") if title_el else ""
-            url = ""
-            if job_id:
-                url = f"https://www.linkedin.com/jobs/view/{job_id}/"
-            elif href:
-                url = urljoin("https://www.linkedin.com", href)
-
-            applicant_el = card.query_selector(".jobs-unified-top-card__applicant-count")
-            applicant_text = applicant_el.inner_text().strip() if applicant_el else ""
-
-            easy_apply = bool(card.query_selector(".jobs-apply-button--top-card"))
-
-            listed_el = card.query_selector("time")
-            listed_at = listed_el.get_attribute("datetime") if listed_el else ""
-
-            return JobPosting(
-                job_id=job_id or url,
-                title=title,
-                company=company,
-                location=location,
-                url=url,
-                description="",
-                source_url=page.url,
-                listed_at=listed_at,
-                scraped_at=utc_now_iso(),
-                easy_apply=easy_apply,
-                applicant_count_text=applicant_text,
-            )
+            page.wait_for_selector(CARD_SELECTOR, timeout=15000)
         except Exception:
+            pass
+
+    def _collect_current_page_results(self, page: Any) -> list[dict]:
+        cards = page.query_selector_all(CARD_SELECTOR)
+        results = []
+        for card in cards:
+            try:
+                job_id = (
+                    card.get_attribute("data-occludable-job-id")
+                    or card.get_attribute("data-job-id")
+                    or ""
+                )
+                title_el = card.query_selector(
+                    ".job-card-list__title, "
+                    ".job-card-container__link, "
+                    "a[href*='/jobs/view/']"
+                )
+                title = title_el.inner_text().strip() if title_el else ""
+                if not title:
+                    continue
+                company_el = card.query_selector(
+                    ".job-card-container__primary-description, "
+                    ".artdeco-entity-lockup__subtitle"
+                )
+                company = company_el.inner_text().strip() if company_el else ""
+                location_el = card.query_selector(
+                    ".job-card-container__metadata-item, "
+                    ".artdeco-entity-lockup__caption"
+                )
+                location = location_el.inner_text().strip() if location_el else ""
+                href = title_el.get_attribute("href") if title_el else ""
+                url = ""
+                if job_id:
+                    url = f"https://www.linkedin.com/jobs/view/{job_id}/"
+                elif href:
+                    url = urljoin("https://www.linkedin.com", href)
+                listed_el = card.query_selector("time")
+                listed_at = listed_el.get_attribute("datetime") if listed_el else ""
+                easy_apply = bool(card.query_selector(".jobs-apply-button--top-card"))
+                applicant_el = card.query_selector(".jobs-unified-top-card__applicant-count")
+                applicant_text = applicant_el.inner_text().strip() if applicant_el else ""
+                results.append(dict(
+                    job_id=job_id, title=title, company=company, location=location,
+                    url=url, listed_at=listed_at, easy_apply=easy_apply,
+                    applicant_count_text=applicant_text, source_url=page.url,
+                ))
+            except Exception:
+                continue
+        return results
+
+    def _parse_card_data(self, item: dict) -> JobPosting | None:
+        if not item.get("title") or not item.get("url"):
             return None
+        return JobPosting(
+            job_id=item["job_id"] or item["url"],
+            title=item["title"],
+            company=item["company"],
+            location=item["location"],
+            url=item["url"],
+            description="",
+            source_url=item["source_url"],
+            listed_at=item["listed_at"],
+            scraped_at=utc_now_iso(),
+            easy_apply=item["easy_apply"],
+            applicant_count_text=item["applicant_count_text"],
+        )
+
+    def _go_to_next_page(self, page: Any) -> None:
+        next_btn = page.query_selector("button[aria-label='View next page']")
+        if next_btn:
+            next_btn.click()
+            page.wait_for_timeout(3000)
+        else:
+            raise StopIteration("No next page button found")
 
     def _open_search_with_filters(self, page: Any, headless: bool = True) -> None:
         cfg = self.config
