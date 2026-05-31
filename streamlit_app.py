@@ -22,8 +22,7 @@ os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _PW_BROWSERS_PATH
 _pw_flag = Path(tempfile.gettempdir()) / ".pw_chromium_installed_v2"
 if not _pw_flag.exists():
     _result = subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-        capture_output=True, text=True,
+        [sys.executable, "-m", "playwright", "install", "chromium"],
         env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": _PW_BROWSERS_PATH},
     )
     if _result.returncode == 0:

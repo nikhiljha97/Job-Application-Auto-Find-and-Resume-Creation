@@ -12,10 +12,17 @@ import time
 _PW_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/tmp/ms-playwright")
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _PW_PATH
 
-# Ensure Chromium binary is present (Streamlit Cloud doesn't pre-install it).
-subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-               capture_output=True,
-               env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": _PW_PATH})
+# Ensure Chromium binary is present.
+print("Installing Playwright Chromium binary…", flush=True)
+_install = subprocess.run(
+    [sys.executable, "-m", "playwright", "install", "chromium"],
+    capture_output=False,
+    env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": _PW_PATH},
+)
+if _install.returncode != 0:
+    print(f"ERROR: playwright install failed (exit {_install.returncode})", flush=True)
+    sys.exit(1)
+print("Playwright install done.", flush=True)
 
 from playwright.sync_api import sync_playwright
 
