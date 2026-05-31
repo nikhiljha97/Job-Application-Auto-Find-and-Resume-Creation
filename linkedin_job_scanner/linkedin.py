@@ -210,12 +210,21 @@ class LinkedInScanner:
             return self._launch_persistent_context(playwright, headless)
 
     def _launch_persistent_context(self, playwright: Any, headless: bool) -> Any:
-        return playwright.chromium.launch_persistent_context(
+        ctx = playwright.chromium.launch_persistent_context(
             str(self.profile_dir),
             headless=headless,
             viewport={"width": 1440, "height": 1100},
             slow_mo=60,
         )
+        # Inject saved cookies (e.g. li_at pasted via the Streamlit UI)
+        cookies_file = self.profile_dir / "cookies.json"
+        if cookies_file.exists():
+            import json as _json
+            try:
+                ctx.add_cookies(_json.loads(cookies_file.read_text()))
+            except Exception as exc:
+                print(f"Warning: could not inject saved cookies: {exc}")
+        return ctx
 
     def _looks_like_profile_cache_error(self, exc: Exception) -> bool:
         text = str(exc).lower()
