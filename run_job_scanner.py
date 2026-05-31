@@ -144,6 +144,10 @@ def run_once(config: dict[str, Any], sample: bool = False, create_resumes: bool 
         key=lambda item: (applicant_sort_value(item), -scores[item.key()].overall_score),
     )
 
+    if create_resumes and not resume_bank.documents:
+        print("Skipping resume creation: no DOCX resume files found in resume_root. Add .docx files to generate tailored resumes.")
+        create_resumes = False
+
     if create_resumes:
         created = 0
         max_resumes = int(config.get("max_resumes_per_run", 25))

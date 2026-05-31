@@ -92,7 +92,10 @@ def score_job(job: JobPosting, resume_bank: ResumeBank, config: dict[str, Any]) 
         + ats_keyword_coverage * 0.10
     )
 
-    best_resume = resume_bank.best_resume_for_job(job_text, config.get("preferred_resume_templates", []))
+    matched_resume_path = None
+    if resume_bank.documents:
+        best_resume = resume_bank.best_resume_for_job(job_text, config.get("preferred_resume_templates", []))
+        matched_resume_path = best_resume.path
     notes = _build_notes(job_keywords, matched_keywords, missing_keywords)
     return ScoreResult(
         job_id=job.key(),
@@ -105,7 +108,7 @@ def score_job(job: JobPosting, resume_bank: ResumeBank, config: dict[str, Any]) 
         ats_keyword_coverage=ats_keyword_coverage,
         matched_keywords=matched_keywords[:35],
         missing_keywords=missing_keywords[:25],
-        matched_resume_path=best_resume.path,
+        matched_resume_path=matched_resume_path,
         notes=notes,
     )
 
