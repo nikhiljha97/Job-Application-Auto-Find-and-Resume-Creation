@@ -343,10 +343,14 @@ elif page == "🔐 LinkedIn Login":
     if li_method == "Cookie (recommended — no CAPTCHA)":
         st.info(
             "**How to get your `li_at` cookie (30 seconds):**\n\n"
-            "1. Open LinkedIn in your browser and make sure you're logged in\n"
+            "1. Open LinkedIn in a **private/incognito window** and log in\n"
             "2. Press **F12** → Application tab → Cookies → `https://www.linkedin.com`\n"
             "3. Find the cookie named **`li_at`** and copy its value\n"
-            "4. Paste it below and click Save\n\n"
+            "4. Paste it below and click Save, then close the incognito window\n\n"
+            "**Why incognito?** The scanner uses your cookie to start its own browser session. "
+            "Using your main browser's cookie causes LinkedIn to log you out there. "
+            "Using incognito gives a separate session — closing it doesn't affect your main browser. "
+            "After the first scan the scanner stores its own session and won't need the cookie again.\n\n"
             "_Your cookie is stored only in the server's memory profile directory and never committed to GitHub._"
         )
         with st.form("li_cookie_form"):

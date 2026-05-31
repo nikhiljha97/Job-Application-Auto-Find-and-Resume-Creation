@@ -216,15 +216,36 @@ class LinkedInScanner:
             viewport={"width": 1440, "height": 1100},
             slow_mo=60,
         )
-        # Inject saved cookies (e.g. li_at pasted via the Streamlit UI)
+        # Only inject cookies.json if the persistent profile doesn't already have
+        # a live LinkedIn session. Re-injecting every run creates a new session
+        # event that causes LinkedIn to invalidate the user's browser session.
         cookies_file = self.profile_dir / "cookies.json"
-        if cookies_file.exists():
+        if cookies_file.exists() and not self._profile_has_linkedin_session(ctx):
             import json as _json
             try:
                 ctx.add_cookies(_json.loads(cookies_file.read_text()))
+                print("Injected saved LinkedIn cookie into fresh profile session.", flush=True)
+                # Delete cookies.json so future scans reuse the profile's stored
+                # session instead of re-injecting (re-injection creates a new
+                # LinkedIn session event that logs out the user's own browser).
+                try:
+                    cookies_file.unlink()
+                    print("cookies.json removed — profile session is now self-contained.", flush=True)
+                except Exception:
+                    pass
             except Exception as exc:
                 print(f"Warning: could not inject saved cookies: {exc}")
         return ctx
+
+    def _profile_has_linkedin_session(self, ctx: Any) -> bool:
+        """Return True if the persistent profile already has a live li_at cookie."""
+        try:
+            for cookie in ctx.cookies("https://www.linkedin.com"):
+                if cookie.get("name") == "li_at" and cookie.get("value"):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def _looks_like_profile_cache_error(self, exc: Exception) -> bool:
         text = str(exc).lower()
@@ -261,6 +282,14 @@ class LinkedInScanner:
                 still_needs_login = "login" in page.url.lower() or "authwall" in page.url.lower()
                 if not still_needs_login:
                     print("LinkedIn session restored from saved cookies.", flush=True)
+                    # Remove cookies.json so subsequent scans rely on the stored
+                    # profile session instead of re-injecting and disturbing the
+                    # user's own browser session.
+                    try:
+                        cookies_file.unlink()
+                        print("cookies.json removed — profile session is now self-contained.", flush=True)
+                    except Exception:
+                        pass
                     return
             except Exception as exc:
                 print(f"Cookie re-injection failed: {exc}", flush=True)
