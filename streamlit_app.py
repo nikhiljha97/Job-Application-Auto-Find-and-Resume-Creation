@@ -67,302 +67,273 @@ def load_env() -> dict[str, str]:
     if ENV_PATH.exists():
         for line in ENV_PATH.read_text().splitlines():
             line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, _, v = line.partition("=")
-            env[k.strip()] = v.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                env[k.strip()] = v.strip()
     return env
 
 
-def save_env(data: dict[str, str]) -> None:
-    lines = [f"{k}={v}" for k, v in data.items()]
+def save_env(env: dict[str, str]) -> None:
+    lines = [f"{k}={v}" for k, v in env.items() if v]
     ENV_PATH.write_text("\n".join(lines) + "\n")
 
 
-def load_jobs() -> list[dict]:
+def load_jobs() -> dict:
     if JOBS_JSON.exists():
-        try:
-            return json.loads(JOBS_JSON.read_text())
-        except Exception:
-            return []
-    return []
+        with open(JOBS_JSON) as f:
+            return json.load(f)
+    return {}
 
 
 def load_scores() -> dict:
     if SCORES_JSON.exists():
-        try:
-            return json.loads(SCORES_JSON.read_text())
-        except Exception:
-            return {}
+        with open(SCORES_JSON) as f:
+            return json.load(f)
     return {}
+
+
+def score_color(score: float) -> str:
+    if score >= 8:
+        return "🟢"
+    if score >= 6:
+        return "🟡"
+    return "🔴"
+
+
+def session_status(profile_dir: Path) -> str:
+    if profile_dir.exists() and any(profile_dir.iterdir()):
+        return "✅ Session saved"
+    return "⚠️ Not logged in"
+
+
+def run_subprocess(cmd: list[str], log_placeholder) -> int:
+    log_lines: list[str] = []
+
+    def _stream(proc: subprocess.Popen, q: queue.Queue) -> None:
+        assert proc.stdout is not None
+        for line in iter(proc.stdout.readline, ""):
+            q.put(line)
+        q.put(None)
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        cwd=str(PROJECT_ROOT),
+        env=env,
+    )
+    q: queue.Queue = queue.Queue()
+    t = threading.Thread(target=_stream, args=(proc, q), daemon=True)
+    t.start()
+
+    while True:
+        try:
+            line = q.get(timeout=0.2)
+        except queue.Empty:
+            if proc.poll() is not None:
+                break
+            continue
+        if line is None:
+            break
+        log_lines.append(line.rstrip())
+        log_placeholder.code("\n".join(log_lines[-80:]), language="text")
+
+    proc.wait()
+    return proc.returncode
+
+
+def _run_login(runner_script: Path, email: str, password: str, profile_dir: Path):
+    """Run a headless login script, handle 2FA interactively. Returns (success, log_lines)."""
+    tmp = Path(tempfile.mkdtemp())
+    creds_file = tmp / "creds.json"
+    twofa_req = tmp / "need_2fa"
+    twofa_resp = tmp / "code_2fa"
+    creds_file.write_text(json.dumps({"email": email, "password": password}))
+
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(runner_script),
+         str(creds_file), str(twofa_req), str(twofa_resp), str(profile_dir)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        env={**os.environ, "PYTHONUNBUFFERED": "1",
+             "PLAYWRIGHT_BROWSERS_PATH": _PW_BROWSERS_PATH},
+    )
+
+    log_area = st.empty()
+    log_lines: list[str] = []
+    needs_2fa = False
+
+    with st.spinner("Logging in headlessly…"):
+        assert proc.stdout
+        for raw in iter(proc.stdout.readline, ""):
+            line = raw.rstrip()
+            log_lines.append(line)
+            log_area.code("\n".join(log_lines), language="text")
+            if "NEED_2FA" in line:
+                needs_2fa = True
+                break
+            if "LOGIN_SUCCESS" in line or "LOGIN_FAILED" in line:
+                break
+
+    creds_file.unlink(missing_ok=True)
+
+    if needs_2fa:
+        st.warning("**2FA required.** Check your phone or email for a verification code.")
+        twofa_code = st.text_input("Enter verification code", key=f"2fa_{runner_script.stem}")
+        if st.button("Submit code", key=f"2fa_btn_{runner_script.stem}", type="primary"):
+            twofa_resp.write_text(twofa_code.strip())
+            with st.spinner("Verifying…"):
+                for raw in iter(proc.stdout.readline, ""):
+                    line = raw.rstrip()
+                    log_lines.append(line)
+                    log_area.code("\n".join(log_lines), language="text")
+                    if "LOGIN_SUCCESS" in line or "LOGIN_FAILED" in line:
+                        break
+                proc.wait()
+            twofa_resp.unlink(missing_ok=True)
+            twofa_req.unlink(missing_ok=True)
+        else:
+            return False, log_lines
+    else:
+        proc.wait()
+
+    success = any("LOGIN_SUCCESS" in l for l in log_lines)
+    return success, log_lines
 
 
 # ── sidebar nav ────────────────────────────────────────────────────────────────────────
 
-PAGES = [
-    "🏠 Dashboard",
-    "▶️ Run Scanner",
-    "🔍 Job Results",
-    "⚙️ Configuration",
-    "🔒 LinkedIn Login",
-    "🔒 Indeed Login",
-]
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "🏠 Dashboard",
+        "🔐 LinkedIn Login",
+        "🔐 Indeed Login",
+        "▶️ Run Scanner",
+        "📋 Results",
+        "⚙️ Configuration",
+        "🔔 Notifications",
+    ],
+    label_visibility="collapsed",
+)
 
-with st.sidebar:
-    st.title("🔍 Job Scanner")
-    page = st.radio("Navigate", PAGES, label_visibility="collapsed")
+st.sidebar.divider()
+config_exists = CONFIG_PATH.exists()
+st.sidebar.caption(f"Config: {'✅ found' if config_exists else '⚠️ missing'}")
+st.sidebar.caption(f"LinkedIn: {session_status(LINKEDIN_PROFILE)}")
+st.sidebar.caption(f"Indeed:   {session_status(INDEED_PROFILE)}")
+jobs = load_jobs()
+scores = load_scores()
+st.sidebar.caption(f"Jobs tracked: {len(jobs)}")
+excel_path = OUTPUT_DIR / "linkedin_job_results.xlsx"
+if excel_path.exists():
+    mtime = time.strftime("%b %d %H:%M", time.localtime(excel_path.stat().st_mtime))
+    st.sidebar.caption(f"Last Excel: {mtime}")
 
+# ── dashboard ─────────────────────────────────────────────────────────────────────────────
 
-# ───────────────────────────────────────────────────────────────────────────────────
-# Dashboard
-# ───────────────────────────────────────────────────────────────────────────────────
 if page == "🏠 Dashboard":
-    st.title("🏠 Dashboard")
-    jobs = load_jobs()
-    scores = load_scores()
-    config = load_config()
-    min_score = float(config.get("min_score", 6.0))
+    st.title("Job Application Scanner")
+    st.caption("LinkedIn + Indeed job scanner — scan, score, and generate tailored resumes")
 
-    col1, col2, col3, col4 = st.columns(4)
-    total = len(jobs)
-    scored = len(scores)
-    matching = sum(1 for s in scores.values() if isinstance(s, dict) and s.get("overall_score", 0) >= min_score)
-    easy_apply = sum(1 for j in jobs if isinstance(j, dict) and j.get("easy_apply"))
+    cfg = load_config()
+    min_score = float(cfg.get("min_score", 6.0))
 
-    col1.metric("💼 Total Jobs", total)
-    col2.metric("✅ Scored", scored)
-    col3.metric("🎯 Matching", matching)
-    col4.metric("⚡ Easy Apply", easy_apply)
-
-    if jobs and scores:
-        st.subheader("Top Matches")
-        job_map = {j.get("job_id", j.get("url", "")): j for j in jobs if isinstance(j, dict)}
-        ranked = sorted(
-            [(k, v) for k, v in scores.items() if isinstance(v, dict) and v.get("overall_score", 0) >= min_score],
-            key=lambda x: -x[1].get("overall_score", 0),
-        )[:10]
-        for key, score in ranked:
-            job = job_map.get(key, {})
-            title = job.get("title", "Unknown")
-            company = job.get("company", "")
-            url = job.get("url", "")
-            s = score.get("overall_score", 0)
-            st.markdown(f"**{s:.1f}/10** — [{title}]({url}) @ {company}")
-    elif not jobs:
-        st.info("No jobs scanned yet. Go to **Run Scanner** to start.")
-
-
-# ───────────────────────────────────────────────────────────────────────────────────
-# Run Scanner
-# ───────────────────────────────────────────────────────────────────────────────────
-elif page == "▶️ Run Scanner":
-    st.title("▶️ Run Scanner")
-
-    col_l, col_r = st.columns(2)
-    with col_l:
-        scan_linkedin = st.checkbox("Scan LinkedIn", value=True)
-    with col_r:
-        scan_indeed = st.checkbox("Scan Indeed", value=False)
-
-    run_btn = st.button("🚀 Run Scanner Now", type="primary")
-
-    output_placeholder = st.empty()
-    status_placeholder = st.empty()
-
-    if run_btn:
-        config = load_config()
-        if not scan_linkedin and not scan_indeed:
-            st.warning("Select at least one platform to scan.")
-        else:
-            env = {**os.environ}
-            if not scan_linkedin:
-                env["SKIP_LINKEDIN"] = "1"
-            if not scan_indeed:
-                env["SKIP_INDEED"] = "1"
-
-            cmd = [sys.executable, "-u", str(PROJECT_ROOT / "run_job_scanner.py"), "--once"]
-            log_lines: list[str] = []
-            output_area = st.empty()
-
-            def stream_output(proc: subprocess.Popen) -> None:
-                assert proc.stdout is not None
-                for raw in proc.stdout:
-                    line = raw.rstrip("\n")
-                    log_lines.append(line)
-
-            with st.spinner("Scanner running…"):
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    env=env,
-                    cwd=str(PROJECT_ROOT),
-                )
-                t = threading.Thread(target=stream_output, args=(proc,), daemon=True)
-                t.start()
-                while proc.poll() is None:
-                    output_area.code("\n".join(log_lines[-60:]), language="")
-                    time.sleep(0.5)
-                t.join(timeout=5)
-                output_area.code("\n".join(log_lines), language="")
-
-            if proc.returncode == 0:
-                st.success("✅ Scanner completed successfully.")
-            else:
-                st.error(f"❌ Scanner exited with code {proc.returncode}")
-
-
-# ───────────────────────────────────────────────────────────────────────────────────
-# Job Results
-# ───────────────────────────────────────────────────────────────────────────────────
-elif page == "🔍 Job Results":
-    st.title("🔍 Job Results")
-    jobs = load_jobs()
-    scores = load_scores()
-    config = load_config()
-    min_score = float(config.get("min_score", 6.0))
-
-    if not jobs:
-        st.info("No jobs yet. Run the scanner to populate results.")
-    else:
-        filter_col1, filter_col2, filter_col3 = st.columns(3)
-        with filter_col1:
-            search_term = st.text_input("🔍 Filter by title/company", "")
-        with filter_col2:
-            min_score_filter = st.slider("Min score", 1.0, 10.0, min_score, 0.5)
-        with filter_col3:
-            easy_apply_only = st.checkbox("Easy Apply only", value=False)
-
-        job_map = {j.get("job_id", j.get("url", "")): j for j in jobs if isinstance(j, dict)}
-        scored_jobs = [
-            (key, score, job_map[key])
-            for key, score in scores.items()
-            if isinstance(score, dict)
-            and key in job_map
-            and score.get("overall_score", 0) >= min_score_filter
-        ]
-        if search_term:
-            scored_jobs = [
-                (k, s, j) for k, s, j in scored_jobs
-                if search_term.lower() in j.get("title", "").lower()
-                or search_term.lower() in j.get("company", "").lower()
-            ]
-        if easy_apply_only:
-            scored_jobs = [(k, s, j) for k, s, j in scored_jobs if j.get("easy_apply")]
-
-        scored_jobs.sort(key=lambda x: -x[1].get("overall_score", 0))
-        st.write(f"Showing {len(scored_jobs)} jobs")
-
-        for key, score, job in scored_jobs:
-            title = job.get("title", "Unknown")
-            company = job.get("company", "")
-            location = job.get("location", "")
-            url = job.get("url", "")
-            s = score.get("overall_score", 0)
-            easy = "⚡ Easy Apply" if job.get("easy_apply") else ""
-            applicants = job.get("applicant_count_text", "")
-
-            with st.expander(f"{s:.1f}/10 — {title} @ {company} {easy}"):
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    st.markdown(f"**Company:** {company}")
-                    st.markdown(f"**Location:** {location}")
-                    if applicants:
-                        st.markdown(f"**Applicants:** {applicants}")
-                    if url:
-                        st.markdown(f"[View on LinkedIn]({url})")
-                with col2:
-                    st.markdown(f"**Score:** {s:.2f}/10")
-                    for field in ("role_fit", "skill_match", "experience_match", "domain_fit"):
-                        v = score.get(field)
-                        if v is not None:
-                            st.markdown(f"**{field.replace('_', ' ').title()}:** {v:.1f}")
-                description = job.get("description", "")
-                if description:
-                    st.markdown("**Description:**")
-                    st.markdown(description[:800] + ("..." if len(description) > 800 else ""))
-                notes = score.get("notes", "")
-                if notes:
-                    st.caption(notes)
-
-
-# ───────────────────────────────────────────────────────────────────────────────────
-# Configuration
-# ───────────────────────────────────────────────────────────────────────────────────
-elif page == "⚙️ Configuration":
-    st.title("⚙️ Configuration")
-    config = load_config()
-    env = load_env()
-
-    with st.expander("🔍 Search Settings", expanded=True):
-        search_query = st.text_input("Search query", config.get("search_query", ""))
-        linkedin_location = st.text_input("LinkedIn location", config.get("linkedin_location", "Canada"))
-        max_pages = st.number_input("Max pages", min_value=1, max_value=20, value=int(config.get("max_pages", 5)))
-        min_score = st.number_input("Min score (0–10)", min_value=0.0, max_value=10.0, value=float(config.get("min_score", 6.0)), step=0.5)
-
-    with st.expander("📁 Paths"):
-        resume_root = st.text_input("Resume root directory", config.get("resume_root", ""))
-        output_dir = st.text_input("Output directory", config.get("output_dir", "outputs"))
-
-    with st.expander("☁️ OneDrive (optional)"):
-        one_enabled = st.checkbox("Enable OneDrive", value=bool(config.get("onedrive", {}).get("enabled", False)))
-        one_client_id = st.text_input("Client ID", config.get("onedrive", {}).get("client_id", ""))
-        one_folder = st.text_input("Upload folder", config.get("onedrive", {}).get("upload_folder", "JobScanner"))
-
-    with st.expander("☁️ Google Drive (optional)"):
-        gd_enabled = st.checkbox("Enable Google Drive", value=bool(config.get("google_drive", {}).get("enabled", False)))
-        gd_folder = st.text_input("Google Drive folder", config.get("google_drive", {}).get("upload_folder", "JobScanner"))
-        gd_creds = st.text_area("service_account.json contents", env.get("GOOGLE_SERVICE_ACCOUNT_JSON", ""), height=120)
-
-    with st.expander("🔔 Notifications (optional)"):
-        notify_email = st.text_input("Notify email", env.get("NOTIFY_EMAIL", ""))
-        notify_smtp = st.text_input("SMTP server", env.get("NOTIFY_SMTP_SERVER", ""))
-        notify_smtp_user = st.text_input("SMTP user", env.get("NOTIFY_SMTP_USER", ""))
-        notify_smtp_pass = st.text_input("SMTP password", env.get("NOTIFY_SMTP_PASS", ""), type="password")
-
-    if st.button("Save Configuration", type="primary"):
-        config["search_query"] = search_query
-        config["linkedin_location"] = linkedin_location
-        config["max_pages"] = max_pages
-        config["min_score"] = min_score
-        config["resume_root"] = resume_root
-        config["output_dir"] = output_dir
-        config.setdefault("onedrive", {})
-        config["onedrive"]["enabled"] = one_enabled
-        config["onedrive"]["client_id"] = one_client_id
-        config["onedrive"]["upload_folder"] = one_folder
-        config.setdefault("google_drive", {})
-        config["google_drive"]["enabled"] = gd_enabled
-        config["google_drive"]["upload_folder"] = gd_folder
-        save_config(config)
-        env_data = load_env()
-        if notify_email:
-            env_data["NOTIFY_EMAIL"] = notify_email
-        if notify_smtp:
-            env_data["NOTIFY_SMTP_SERVER"] = notify_smtp
-        if notify_smtp_user:
-            env_data["NOTIFY_SMTP_USER"] = notify_smtp_user
-        if notify_smtp_pass:
-            env_data["NOTIFY_SMTP_PASS"] = notify_smtp_pass
-        if gd_creds:
-            env_data["GOOGLE_SERVICE_ACCOUNT_JSON"] = gd_creds
-        save_env(env_data)
-        st.success("✅ Configuration saved.")
-        st.rerun()
-
-
-# ───────────────────────────────────────────────────────────────────────────────────
-# LinkedIn Login
-# ───────────────────────────────────────────────────────────────────────────────────
-elif page == "🔒 LinkedIn Login":
-    st.title("🔒 LinkedIn Login")
-    st.markdown(
-        "The scanner uses a headless browser to search LinkedIn. "
-        "You need to authenticate once so it can access job listings."
+    ranked = sorted(
+        [
+            (jid, job, scores[jid])
+            for jid, job in jobs.items()
+            if jid in scores and scores[jid].get("overall_score", 0) >= min_score
+            and job.get("accepting_applications", True)
+        ],
+        key=lambda x: -x[2].get("overall_score", 0),
     )
 
-    config = load_config()
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Jobs Tracked", len(jobs))
+    col2.metric(f"Jobs >= {min_score}", len(ranked))
+    with_resumes = sum(1 for _, _, s in ranked if s.get("resume_path"))
+    col3.metric("Resumes Generated", with_resumes)
+    applied = sum(1 for j in jobs.values() if j.get("application_status") == "Applied")
+    col4.metric("Applied", applied)
+
+    linkedin_count = sum(1 for j in jobs.values() if "indeed" not in j.get("url", "").lower())
+    indeed_count = sum(1 for j in jobs.values() if "indeed" in j.get("url", "").lower())
+    if linkedin_count or indeed_count:
+        src1, src2 = st.columns(2)
+        src1.metric("LinkedIn Jobs", linkedin_count)
+        src2.metric("Indeed Jobs", indeed_count)
+
+    if not ranked:
+        st.info("No results yet. Run the scanner from the **Run Scanner** page.")
+    else:
+        st.subheader("Top Matches")
+        for jid, job, score in ranked[:20]:
+            overall = score.get("overall_score", 0)
+            source_tag = "Indeed" if "indeed" in job.get("url", "").lower() else "LinkedIn"
+            with st.expander(
+                f"{score_color(overall)} {overall:.1f}/10  [{source_tag}] — {job.get('title')} @ {job.get('company')} ({job.get('location', '')})"
+            ):
+                cols = st.columns([2, 1, 1, 1])
+                cols[0].markdown(f"**[View Job]({job.get('url', '#')})**")
+                cols[1].metric("Role Fit", f"{score.get('role_fit', 0):.1f}")
+                cols[2].metric("Skill Match", f"{score.get('skill_match', 0):.1f}")
+                cols[3].metric("ATS Score", f"{score.get('resume_ats_score', 0):.0f}/100")
+
+                matched = score.get("matched_keywords", [])
+                missing = score.get("missing_keywords", [])
+                if matched:
+                    st.markdown("**Matched:** " + ", ".join(f"`{k}`" for k in matched[:12]))
+                if missing:
+                    st.markdown("**Gaps:** " + ", ".join(f"`{k}`" for k in missing[:8]))
+
+                resume_path = score.get("resume_path", "")
+                cover_path = score.get("cover_letter_path", "")
+                onedrive_url = score.get("onedrive_doc_url", "")
+                dl_cols = st.columns(4)
+                if resume_path and Path(resume_path).exists():
+                    with open(resume_path, "rb") as fh:
+                        dl_cols[0].download_button(
+                            "Download Resume",
+                            fh.read(),
+                            file_name=Path(resume_path).name,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key=f"resume_{jid}",
+                        )
+                if cover_path and Path(cover_path).exists():
+                    with open(cover_path, "rb") as fh:
+                        dl_cols[1].download_button(
+                            "Download Cover Letter",
+                            fh.read(),
+                            file_name=Path(cover_path).name,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key=f"cover_{jid}",
+                        )
+                if onedrive_url:
+                    dl_cols[2].link_button("OneDrive Resume", onedrive_url)
+                if score.get("onedrive_cover_letter_url"):
+                    dl_cols[3].link_button("OneDrive Cover Letter", score["onedrive_cover_letter_url"])
+
+    if excel_path.exists():
+        st.divider()
+        with open(excel_path, "rb") as fh:
+            st.download_button(
+                "Download Full Excel Results",
+                fh.read(),
+                file_name="linkedin_job_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+# ── linkedin login ────────────────────────────────────────────────────────────────────────────
+
+elif page == "🔐 LinkedIn Login":
+    st.title("LinkedIn Login")
+
+    li_status = session_status(LINKEDIN_PROFILE)
+    st.caption(f"Session status: {li_status}")
+
     li_method = st.radio(
         "Login method",
         ["Cookie (recommended — no CAPTCHA)", "Email & password (headless)"],
@@ -416,240 +387,413 @@ elif page == "🔒 LinkedIn Login":
         with st.form("linkedin_login_form"):
             li_email = st.text_input("LinkedIn email")
             li_password = st.text_input("LinkedIn password", type="password")
-            li_submit = st.form_submit_button("Login", type="primary")
+            li_submit = st.form_submit_button("Login to LinkedIn", type="primary")
 
         if li_submit:
             if not li_email or not li_password:
-                st.error("Email and password are required.")
+                st.error("Enter both email and password.")
             else:
-                _run_login(li_email, li_password, config)
+                runner = PROJECT_ROOT / "_linkedin_login_runner.py"
+                success, log_lines = _run_login(runner, li_email, li_password, LINKEDIN_PROFILE)
+                if success:
+                    st.success("LinkedIn login successful! Session saved.")
+                    st.rerun()
+                elif not any("NEED_2FA" in l for l in log_lines):
+                    st.error("Login failed. If you see a CAPTCHA/challenge, use the Cookie method instead.")
+                    st.code("\n".join(log_lines))
 
+    if LINKEDIN_PROFILE.exists():
+        files = list(LINKEDIN_PROFILE.iterdir())
+        st.caption(f"Profile: `{LINKEDIN_PROFILE}` — {len(files)} files stored")
 
-def _run_login(email: str, password: str, config: dict) -> None:
-    import json as _json
-    import tempfile as _tmp
+# ── indeed login ──────────────────────────────────────────────────────────────────────────────
 
-    creds_file = Path(_tmp.mktemp(suffix=".json"))
-    twofa_req = Path(_tmp.mktemp(suffix=".txt"))
-    twofa_resp = Path(_tmp.mktemp(suffix=".txt"))
-    profile_dir = str(LINKEDIN_PROFILE)
+elif page == "🔐 Indeed Login":
+    st.title("Indeed Login")
 
-    creds_file.write_text(_json.dumps({"email": email, "password": password}))
-
-    runner = PROJECT_ROOT / "_linkedin_login_runner.py"
-    cmd = [
-        sys.executable,
-        "-u",
-        str(runner),
-        str(creds_file),
-        str(twofa_req),
-        str(twofa_resp),
-        profile_dir,
-    ]
-    env = {
-        **os.environ,
-        "PLAYWRIGHT_BROWSERS_PATH": _PW_BROWSERS_PATH,
-    }
-
-    log_lines: list[str] = []
-    twofa_prompted = False
-    twofa_code_entered = False
-    status_area = st.empty()
-    log_area = st.empty()
-    twofa_area = st.empty()
-
-    with st.spinner("Logging in to LinkedIn…"):
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=env,
-            cwd=str(PROJECT_ROOT),
-        )
-
-        out_q: queue.Queue[str | None] = queue.Queue()
-
-        def _reader(p: subprocess.Popen, q: queue.Queue) -> None:
-            assert p.stdout
-            for line in p.stdout:
-                q.put(line.rstrip("\n"))
-            q.put(None)
-
-        threading.Thread(target=_reader, args=(proc, out_q), daemon=True).start()
-
-        while True:
-            try:
-                line = out_q.get(timeout=0.3)
-            except queue.Empty:
-                line = ""
-
-            if line is None:
-                break
-
-            if line:
-                log_lines.append(line)
-                log_area.code("\n".join(log_lines[-40:]), language="")
-
-            if "NEED_2FA" in (line or "") and not twofa_prompted:
-                twofa_prompted = True
-                with twofa_area.container():
-                    st.warning("🔐 LinkedIn 2FA required")
-                    with st.form("twofa_form"):
-                        code = st.text_input("Enter your 2FA code")
-                        submit_2fa = st.form_submit_button("Submit")
-                    if submit_2fa and code:
-                        twofa_resp.write_text(code.strip())
-                        twofa_code_entered = True
-                        twofa_area.empty()
-
-            if proc.poll() is not None:
-                break
-
-            time.sleep(0.1)
-
-        proc.wait()
-
-    try:
-        creds_file.unlink(missing_ok=True)
-    except Exception:
-        pass
-
-    full_output = "\n".join(log_lines)
-    if "LOGIN_SUCCESS" in full_output:
-        status_area.success("✅ LinkedIn login successful! The session is saved for future scans.")
-    elif "LOGIN_FAILED" in full_output:
-        msg = next((l for l in log_lines if "LOGIN_FAILED" in l), "Login failed")
-        status_area.error(f"❌ {msg}")
-    else:
-        status_area.warning("⚠️ Login completed but status unclear. Check the log above.")
-
-
-# ───────────────────────────────────────────────────────────────────────────────────
-# Indeed Login
-# ───────────────────────────────────────────────────────────────────────────────────
-elif page == "🔒 Indeed Login":
-    st.title("🔒 Indeed Login")
-    st.markdown(
-        "The scanner can optionally search Indeed for jobs. "
-        "Authenticate once to allow access."
-    )
-
-    config = load_config()
-
+    indeed_status = session_status(INDEED_PROFILE)
     st.info(
-        "A headless browser will log in to Indeed on the server. "
-        "If Indeed shows a CAPTCHA or bot check, the login may fail."
+        f"**Session status:** {indeed_status}\n\n"
+        "Enter your Indeed credentials below. A **headless browser** runs on the server, "
+        "logs in, and saves only the session cookie to `.indeed_profile/`. "
+        "Your password is used once and never stored."
     )
+
+    if indeed_status.startswith("✅"):
+        st.success("Session already saved. Re-enter credentials below to refresh it.")
+
     with st.form("indeed_login_form"):
-        indeed_email = st.text_input("Indeed email")
-        indeed_password = st.text_input("Indeed password", type="password")
-        indeed_submit = st.form_submit_button("Login to Indeed", type="primary")
+        in_email = st.text_input("Indeed email")
+        in_password = st.text_input("Indeed password", type="password")
+        in_submit = st.form_submit_button("Login to Indeed", type="primary")
 
-    if indeed_submit:
-        if not indeed_email or not indeed_password:
-            st.error("Email and password are required.")
+    if in_submit:
+        if not in_email or not in_password:
+            st.error("Enter both email and password.")
         else:
-            _run_indeed_login(indeed_email, indeed_password, config)
+            runner = PROJECT_ROOT / "_indeed_login_runner.py"
+            success, log_lines = _run_login(runner, in_email, in_password, INDEED_PROFILE)
+            if success:
+                st.success("Indeed login successful! Session saved — the scanner will reuse it.")
+                st.rerun()
+            elif not any("NEED_2FA" in l for l in log_lines):
+                st.error("Login failed. Check your credentials or try again.")
+                st.code("\n".join(log_lines))
 
+    if INDEED_PROFILE.exists():
+        files = list(INDEED_PROFILE.iterdir())
+        st.caption(f"Profile: `{INDEED_PROFILE}` — {len(files)} files stored")
 
-def _run_indeed_login(email: str, password: str, config: dict) -> None:
-    import json as _json
-    import tempfile as _tmp
+# ── run scanner ────────────────────────────────────────────────────────────────────────────────
 
-    creds_file = Path(_tmp.mktemp(suffix=".json"))
-    twofa_req = Path(_tmp.mktemp(suffix=".txt"))
-    twofa_resp = Path(_tmp.mktemp(suffix=".txt"))
-    profile_dir = str(INDEED_PROFILE)
+elif page == "▶️ Run Scanner":
+    st.title("Run Scanner")
 
-    creds_file.write_text(_json.dumps({"email": email, "password": password}))
+    if not config_exists:
+        st.error("No `config.json` found. Go to **Configuration** and save your settings first.")
+        st.stop()
 
-    runner = PROJECT_ROOT / "_indeed_login_runner.py"
-    if not runner.exists():
-        st.error("Indeed login runner not found.")
-        return
+    li_ok = LINKEDIN_PROFILE.exists() and any(LINKEDIN_PROFILE.iterdir())
+    indeed_ok = INDEED_PROFILE.exists() and any(INDEED_PROFILE.iterdir())
 
-    cmd = [
-        sys.executable,
-        "-u",
-        str(runner),
-        str(creds_file),
-        str(twofa_req),
-        str(twofa_resp),
-        profile_dir,
-    ]
-    env = {
-        **os.environ,
-        "PLAYWRIGHT_BROWSERS_PATH": _PW_BROWSERS_PATH,
-    }
-
-    log_lines: list[str] = []
-    twofa_prompted = False
-    status_area = st.empty()
-    log_area = st.empty()
-    twofa_area = st.empty()
-
-    with st.spinner("Logging in to Indeed…"):
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=env,
-            cwd=str(PROJECT_ROOT),
+    if not li_ok and not indeed_ok:
+        st.warning(
+            "Neither LinkedIn nor Indeed sessions are saved. "
+            "Use the Login pages first, or enable Sample mode below."
         )
 
-        out_q: queue.Queue[str | None] = queue.Queue()
+    st.subheader("Sources")
+    src_col1, src_col2, src_col3 = st.columns(3)
+    scan_linkedin = src_col1.checkbox("Scan LinkedIn", value=li_ok, disabled=not li_ok)
+    scan_indeed = src_col2.checkbox("Scan Indeed", value=indeed_ok, disabled=not indeed_ok)
+    sample_mode = src_col3.checkbox("Sample mode (test without any login)", value=False)
 
-        def _reader(p: subprocess.Popen, q: queue.Queue) -> None:
-            assert p.stdout
-            for line in p.stdout:
-                q.put(line.rstrip("\n"))
-            q.put(None)
+    opt_col1, _ = st.columns(2)
+    no_resumes = opt_col1.checkbox("Skip resume/cover letter generation", value=False)
 
-        threading.Thread(target=_reader, args=(proc, out_q), daemon=True).start()
+    cfg = load_config()
+    max_pages = st.slider(
+        "Max pages to scan per source",
+        min_value=1, max_value=20,
+        value=int(cfg.get("max_pages", 6)),
+        disabled=sample_mode,
+    )
 
-        while True:
-            try:
-                line = out_q.get(timeout=0.3)
-            except queue.Empty:
-                line = ""
+    if st.button("Start Scan", type="primary"):
+        if not sample_mode and not scan_linkedin and not scan_indeed:
+            st.error("Select at least one source or enable Sample mode.")
+            st.stop()
 
-            if line is None:
-                break
+        overall_ok = True
 
-            if line:
-                log_lines.append(line)
-                log_area.code("\n".join(log_lines[-40:]), language="")
+        if sample_mode or scan_linkedin:
+            st.subheader("LinkedIn Scan Log")
+            log_area_li = st.empty()
+            cmd = [sys.executable, "-u", str(PROJECT_ROOT / "run_job_scanner.py"), "--once", "--headless",
+                   "--max-pages", str(max_pages)]
+            if sample_mode:
+                cmd.append("--sample")
+            if no_resumes:
+                cmd.append("--no-resumes")
+            with st.spinner("Running LinkedIn scanner..."):
+                rc = run_subprocess(cmd, log_area_li)
+            if rc == 0:
+                st.success("LinkedIn scan complete.")
+            else:
+                st.error(f"LinkedIn scanner exited with code {rc}.")
+                overall_ok = False
 
-            if "NEED_2FA" in (line or "") and not twofa_prompted:
-                twofa_prompted = True
-                with twofa_area.container():
-                    st.warning("🔐 Indeed 2FA required")
-                    with st.form("indeed_twofa_form"):
-                        code = st.text_input("Enter your 2FA code")
-                        submit_2fa = st.form_submit_button("Submit")
-                    if submit_2fa and code:
-                        twofa_resp.write_text(code.strip())
-                        twofa_area.empty()
+        if not sample_mode and scan_indeed:
+            st.subheader("Indeed Scan Log")
+            log_area_in = st.empty()
+            cmd_indeed = [sys.executable, "-u", str(PROJECT_ROOT / "run_indeed_scanner.py"),
+                          "--max-pages", str(max_pages)]
+            if no_resumes:
+                cmd_indeed.append("--no-resumes")
+            with st.spinner("Running Indeed scanner..."):
+                rc2 = run_subprocess(cmd_indeed, log_area_in)
+            if rc2 == 0:
+                st.success("Indeed scan complete.")
+            else:
+                st.error(f"Indeed scanner exited with code {rc2}.")
+                overall_ok = False
 
-            if proc.poll() is not None:
-                break
+        if overall_ok:
+            st.balloons()
+            st.success("All scans finished. Check the Results tab.")
 
-            time.sleep(0.1)
+# ── results ──────────────────────────────────────────────────────────────────────────────────
 
-        proc.wait()
+elif page == "📋 Results":
+    st.title("Results")
 
-    try:
-        creds_file.unlink(missing_ok=True)
-    except Exception:
-        pass
+    jobs = load_jobs()
+    scores = load_scores()
 
-    full_output = "\n".join(log_lines)
-    if "LOGIN_SUCCESS" in full_output:
-        status_area.success("✅ Indeed login successful!")
-    elif "LOGIN_FAILED" in full_output:
-        msg = next((l for l in log_lines if "LOGIN_FAILED" in l), "Login failed")
-        status_area.error(f"❌ {msg}")
-    else:
-        status_area.warning("⚠️ Login completed but status unclear. Check the log above.")
+    if not jobs:
+        st.info("No jobs scanned yet. Run the scanner first.")
+        st.stop()
+
+    cfg = load_config()
+    min_score = float(cfg.get("min_score", 6.0))
+
+    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+    min_filter = filter_col1.slider("Min score", 0.0, 10.0, min_score, 0.5)
+    search_term = filter_col2.text_input("Search title / company", "")
+    source_filter = filter_col3.selectbox("Source", ["All", "LinkedIn", "Indeed"])
+    show_closed = filter_col4.checkbox("Show closed", False)
+
+    all_rows = []
+    for jid, job in jobs.items():
+        score = scores.get(jid, {})
+        if score.get("overall_score", 0) < min_filter:
+            continue
+        if not show_closed and not job.get("accepting_applications", True):
+            continue
+        if search_term:
+            haystack = f"{job.get('title','')} {job.get('company','')}".lower()
+            if search_term.lower() not in haystack:
+                continue
+        is_indeed = "indeed" in job.get("url", "").lower()
+        if source_filter == "Indeed" and not is_indeed:
+            continue
+        if source_filter == "LinkedIn" and is_indeed:
+            continue
+        all_rows.append((jid, job, score))
+
+    all_rows.sort(key=lambda x: -x[2].get("overall_score", 0))
+    st.caption(f"Showing {len(all_rows)} jobs")
+
+    if not all_rows:
+        st.info("No jobs match the current filters.")
+        st.stop()
+
+    import pandas as pd
+
+    table_data = []
+    for jid, job, score in all_rows:
+        is_indeed = "indeed" in job.get("url", "").lower()
+        table_data.append({
+            "Score": score.get("overall_score", 0),
+            "Source": "Indeed" if is_indeed else "LinkedIn",
+            "Title": job.get("title", ""),
+            "Company": job.get("company", ""),
+            "Location": job.get("location", ""),
+            "Applicants": job.get("applicant_count_text", ""),
+            "Easy Apply": "Yes" if job.get("easy_apply") else "",
+            "Resume": "Yes" if score.get("resume_path") and Path(score["resume_path"]).exists() else "",
+            "ATS": score.get("resume_ats_score", 0),
+        })
+
+    df = pd.DataFrame(table_data)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        column_config={
+            "Score": st.column_config.NumberColumn(format="%.1f"),
+            "ATS": st.column_config.NumberColumn(format="%.0f"),
+        },
+        hide_index=True,
+    )
+
+    st.subheader("Job Detail")
+    titles = [
+        f"{r[2].get('overall_score',0):.1f} — {r[1].get('title','')} @ {r[1].get('company','')}"
+        for r in all_rows
+    ]
+    selected = st.selectbox("Select a job", titles, index=0)
+    idx = titles.index(selected)
+    _, sel_job, sel_score = all_rows[idx]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Overall", f"{sel_score.get('overall_score',0):.1f}/10")
+    c2.metric("Role Fit", f"{sel_score.get('role_fit',0):.1f}")
+    c3.metric("Skill Match", f"{sel_score.get('skill_match',0):.1f}")
+    c4.metric("ATS Score", f"{sel_score.get('resume_ats_score',0):.0f}/100")
+
+    job_url = sel_job.get("url", "#")
+    st.markdown(
+        f"**[Open Job Posting]({job_url})**  |  {sel_job.get('location','')}  |  "
+        f"{sel_job.get('applicant_count_text','')}  |  Listed: {sel_job.get('listed_at','')}"
+    )
+
+    matched = sel_score.get("matched_keywords", [])
+    missing = sel_score.get("missing_keywords", [])
+    kw_col1, kw_col2 = st.columns(2)
+    kw_col1.markdown("**Matched keywords**\n\n" + "  ".join(f"`{k}`" for k in matched[:20]))
+    kw_col2.markdown("**Keyword gaps**\n\n" + "  ".join(f"`{k}`" for k in missing[:15]))
+
+    with st.expander("Job Description"):
+        st.write(sel_job.get("description", ""))
+
+    dl1, dl2, dl3, dl4 = st.columns(4)
+    resume_path = sel_score.get("resume_path", "")
+    cover_path = sel_score.get("cover_letter_path", "")
+    outreach_path = sel_score.get("cold_outreach_path", "")
+    if resume_path and Path(resume_path).exists():
+        with open(resume_path, "rb") as fh:
+            dl1.download_button("Download Resume", fh.read(), Path(resume_path).name,
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="detail_resume")
+    if cover_path and Path(cover_path).exists():
+        with open(cover_path, "rb") as fh:
+            dl2.download_button("Download Cover Letter", fh.read(), Path(cover_path).name,
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="detail_cover")
+    if outreach_path and Path(outreach_path).exists():
+        with open(outreach_path, "rb") as fh:
+            dl3.download_button("Download Cold Outreach", fh.read(), Path(outreach_path).name,
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="detail_outreach")
+    if sel_score.get("onedrive_doc_url"):
+        dl4.link_button("OneDrive Resume", sel_score["onedrive_doc_url"])
+
+    if excel_path.exists():
+        st.divider()
+        with open(excel_path, "rb") as fh:
+            st.download_button("Download Full Excel", fh.read(), "linkedin_job_results.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# ── configuration ─────────────────────────────────────────────────────────────────────────────
+
+elif page == "⚙️ Configuration":
+    st.title("Configuration")
+    st.caption("Changes are saved to `config.json` in the project root.")
+
+    cfg = load_config()
+
+    with st.form("config_form"):
+        st.subheader("LinkedIn Search")
+        cfg["search_query"] = st.text_input("Search query", cfg.get("search_query", ""))
+        cfg["linkedin_location"] = st.text_input("LinkedIn location", cfg.get("linkedin_location", "Canada"))
+        cfg["max_pages"] = st.number_input("Max pages (LinkedIn)", 1, 50, int(cfg.get("max_pages", 6)))
+        cfg["date_posted"] = st.selectbox(
+            "Date posted",
+            ["Past 24 hours", "Past Week", "Past Month", "Any time"],
+            index=["Past 24 hours", "Past Week", "Past Month", "Any time"].index(
+                cfg.get("date_posted", "Past 24 hours")
+            ),
+        )
+        employment_options = ["Full-time", "Part-time", "Contract", "Temporary", "Volunteer", "Other"]
+        cfg["employment_types"] = st.multiselect(
+            "Employment types", employment_options,
+            default=cfg.get("employment_types", ["Full-time"]),
+        )
+        exp_options = ["Entry-level", "Associate", "Mid-Senior level", "Director", "Executive", "Manager", "Internship"]
+        cfg["experience_levels"] = st.multiselect(
+            "Experience levels", exp_options,
+            default=cfg.get("experience_levels", ["Entry-level", "Manager"]),
+        )
+
+        st.subheader("Indeed Search")
+        cfg["indeed_location"] = st.text_input(
+            "Indeed location", cfg.get("indeed_location", cfg.get("linkedin_location", "Canada"))
+        )
+        cfg["indeed_max_pages"] = st.number_input(
+            "Max pages (Indeed)", 1, 20, int(cfg.get("indeed_max_pages", 4))
+        )
+
+        st.subheader("Scoring & Filtering")
+        cfg["min_score"] = st.slider("Minimum fit score", 0.0, 10.0, float(cfg.get("min_score", 6.0)), 0.1)
+        cfg["max_resumes_per_run"] = st.number_input("Max resumes per run", 1, 200, int(cfg.get("max_resumes_per_run", 80)))
+        cfg["candidate_experience_years"] = st.number_input(
+            "Your years of experience", 0.0, 40.0, float(cfg.get("candidate_experience_years", 3.9)), 0.1
+        )
+        cfg["max_required_experience_years"] = st.number_input(
+            "Max required experience (filter out senior roles)", 0.0, 40.0,
+            float(cfg.get("max_required_experience_years", 5.99)), 0.1
+        )
+        cfg["target_locations"] = st.text_area(
+            "Target locations (one per line)", "\n".join(cfg.get("target_locations", []))
+        ).splitlines()
+        cfg["target_role_keywords"] = st.text_area(
+            "Target role keywords (one per line)", "\n".join(cfg.get("target_role_keywords", []))
+        ).splitlines()
+        cfg["seniority_keywords_to_penalize"] = st.text_area(
+            "Seniority keywords to penalise (one per line)",
+            "\n".join(cfg.get("seniority_keywords_to_penalize", []))
+        ).splitlines()
+
+        st.subheader("OneDrive")
+        one = cfg.setdefault("onedrive", {})
+        one["enabled"] = st.checkbox("Enable OneDrive", bool(one.get("enabled", True)))
+        one["client_id"] = st.text_input("App Client ID", one.get("client_id", ""))
+        one["tenant_id"] = st.text_input("Tenant ID", one.get("tenant_id", "consumers"))
+        one["resume_folder_path"] = st.text_input("Resume folder path", one.get("resume_folder_path", "Job Scan/Resumes"))
+        one["excel_folder_path"] = st.text_input("Excel folder path", one.get("excel_folder_path", "Job Scan"))
+
+        st.subheader("Advanced")
+        cfg["headless"] = st.checkbox(
+            "Run browser headless (always true on Streamlit Cloud)",
+            bool(cfg.get("headless", True)),
+        )
+        submitted = st.form_submit_button("Save Configuration", type="primary")
+
+    if submitted:
+        save_config(cfg)
+        st.success("Configuration saved to `config.json`.")
+
+    with st.expander("Raw JSON"):
+        st.json(cfg)
+
+# ── notifications ─────────────────────────────────────────────────────────────────────────────
+
+elif page == "🔔 Notifications":
+    st.title("Notifications")
+
+    cfg = load_config()
+    env = load_env()
+
+    with st.form("notif_form"):
+        st.subheader("Telegram")
+        notif = cfg.setdefault("notifications", {})
+        tg = notif.setdefault("telegram", {})
+        tg["enabled"] = st.checkbox("Enable Telegram", bool(tg.get("enabled", False)))
+        env["JOB_SCANNER_TELEGRAM_BOT_TOKEN"] = st.text_input(
+            "Bot token", env.get("JOB_SCANNER_TELEGRAM_BOT_TOKEN", ""), type="password"
+        )
+        env["JOB_SCANNER_TELEGRAM_CHAT_ID"] = st.text_input(
+            "Chat ID", env.get("JOB_SCANNER_TELEGRAM_CHAT_ID", "")
+        )
+
+        st.subheader("Email (SMTP)")
+        em = notif.setdefault("email", {})
+        em["enabled"] = st.checkbox("Enable email", bool(em.get("enabled", False)))
+        env["JOB_SCANNER_SMTP_HOST"] = st.text_input("SMTP host", env.get("JOB_SCANNER_SMTP_HOST", "smtp.gmail.com"))
+        env["JOB_SCANNER_SMTP_PORT"] = st.text_input("SMTP port", env.get("JOB_SCANNER_SMTP_PORT", "587"))
+        env["JOB_SCANNER_SMTP_USERNAME"] = st.text_input("SMTP username", env.get("JOB_SCANNER_SMTP_USERNAME", ""))
+        env["JOB_SCANNER_SMTP_PASSWORD"] = st.text_input(
+            "SMTP password", env.get("JOB_SCANNER_SMTP_PASSWORD", ""), type="password"
+        )
+        env["JOB_SCANNER_EMAIL_FROM"] = st.text_input("From address", env.get("JOB_SCANNER_EMAIL_FROM", ""))
+        env["JOB_SCANNER_EMAIL_TO"] = st.text_input("To address", env.get("JOB_SCANNER_EMAIL_TO", ""))
+
+        st.subheader("WhatsApp (Twilio)")
+        wa = notif.setdefault("whatsapp_twilio", {})
+        wa["enabled"] = st.checkbox("Enable WhatsApp", bool(wa.get("enabled", False)))
+        env["JOB_SCANNER_TWILIO_ACCOUNT_SID"] = st.text_input(
+            "Account SID", env.get("JOB_SCANNER_TWILIO_ACCOUNT_SID", ""), type="password"
+        )
+        env["JOB_SCANNER_TWILIO_AUTH_TOKEN"] = st.text_input(
+            "Auth token", env.get("JOB_SCANNER_TWILIO_AUTH_TOKEN", ""), type="password"
+        )
+        env["JOB_SCANNER_TWILIO_FROM"] = st.text_input(
+            "From (WhatsApp)", env.get("JOB_SCANNER_TWILIO_FROM", "whatsapp:+14155238886")
+        )
+        env["JOB_SCANNER_TWILIO_TO"] = st.text_input(
+            "Your WhatsApp number", env.get("JOB_SCANNER_TWILIO_TO", "whatsapp:+1YOURNUMBER")
+        )
+
+        cfg["notification_top_n"] = st.number_input(
+            "Top N jobs in notification", 1, 50, int(cfg.get("notification_top_n", 10))
+        )
+        cfg["notify_only_new_jobs"] = st.checkbox(
+            "Only notify for new jobs",
+            bool(cfg.get("notify_only_new_jobs", True)),
+        )
+        save_notif = st.form_submit_button("Save Notification Settings", type="primary")
+
+    if save_notif:
+        save_config(cfg)
+        save_env(env)
+        st.success("Notification settings saved.")
