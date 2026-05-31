@@ -13,8 +13,6 @@ from pathlib import Path
 import streamlit as st
 
 # Force Playwright to use a writable, consistent path for browser binaries.
-# Streamlit Cloud runs as 'adminuser' but the default cache path can resolve to
-# '/home/appuser/.cache/ms-playwright' causing a user-mismatch. Overriding to /tmp fixes it.
 _PW_BROWSERS_PATH = "/tmp/ms-playwright"
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _PW_BROWSERS_PATH
 
@@ -332,33 +330,71 @@ elif page == "🔐 LinkedIn Login":
     st.title("LinkedIn Login")
 
     li_status = session_status(LINKEDIN_PROFILE)
-    st.info(
-        f"**Session status:** {li_status}\n\n"
-        "Enter your LinkedIn credentials below. A **headless browser** runs on the server, "
-        "logs in, and saves only the session cookie to `.linkedin_profile/`. "
-        "Your password is used once and never stored."
+    st.caption(f"Session status: {li_status}")
+
+    li_method = st.radio(
+        "Login method",
+        ["Cookie (recommended — no CAPTCHA)", "Email & password (headless)"],
+        horizontal=True,
     )
 
-    if li_status.startswith("✅"):
-        st.success("Session already saved. Re-enter credentials below to refresh it.")
+    if li_method == "Cookie (recommended — no CAPTCHA)":
+        st.info(
+            "**How to get your `li_at` cookie (30 seconds):**\n\n"
+            "1. Open LinkedIn in your browser and make sure you're logged in\n"
+            "2. Press **F12** → Application tab → Cookies → `https://www.linkedin.com`\n"
+            "3. Find the cookie named **`li_at`** and copy its value\n"
+            "4. Paste it below and click Save\n\n"
+            "_Your cookie is stored only in the server's memory profile directory and never committed to GitHub._"
+        )
+        with st.form("li_cookie_form"):
+            li_at = st.text_input("Paste your `li_at` cookie value", type="password")
+            save_cookie = st.form_submit_button("Save LinkedIn session", type="primary")
 
-    with st.form("linkedin_login_form"):
-        li_email = st.text_input("LinkedIn email")
-        li_password = st.text_input("LinkedIn password", type="password")
-        li_submit = st.form_submit_button("Login to LinkedIn", type="primary")
-
-    if li_submit:
-        if not li_email or not li_password:
-            st.error("Enter both email and password.")
-        else:
-            runner = PROJECT_ROOT / "_linkedin_login_runner.py"
-            success, log_lines = _run_login(runner, li_email, li_password, LINKEDIN_PROFILE)
-            if success:
-                st.success("LinkedIn login successful! Session saved — the scanner will reuse it.")
+        if save_cookie:
+            if not li_at.strip():
+                st.error("Cookie value cannot be empty.")
+            else:
+                import json as _json
+                LINKEDIN_PROFILE.mkdir(parents=True, exist_ok=True)
+                cookies_file = LINKEDIN_PROFILE / "cookies.json"
+                cookies = [
+                    {
+                        "name": "li_at",
+                        "value": li_at.strip(),
+                        "domain": ".linkedin.com",
+                        "path": "/",
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "None",
+                    }
+                ]
+                cookies_file.write_text(_json.dumps(cookies, indent=2))
+                st.success("LinkedIn session cookie saved! The scanner will use it automatically.")
                 st.rerun()
-            elif not any("NEED_2FA" in l for l in log_lines):
-                st.error("Login failed. Check your credentials or try again.")
-                st.code("\n".join(log_lines))
+    else:
+        st.info(
+            "A headless browser will log in on the server. "
+            "LinkedIn sometimes triggers a CAPTCHA challenge for automated logins — "
+            "if that happens, use the **Cookie** method above instead."
+        )
+        with st.form("linkedin_login_form"):
+            li_email = st.text_input("LinkedIn email")
+            li_password = st.text_input("LinkedIn password", type="password")
+            li_submit = st.form_submit_button("Login to LinkedIn", type="primary")
+
+        if li_submit:
+            if not li_email or not li_password:
+                st.error("Enter both email and password.")
+            else:
+                runner = PROJECT_ROOT / "_linkedin_login_runner.py"
+                success, log_lines = _run_login(runner, li_email, li_password, LINKEDIN_PROFILE)
+                if success:
+                    st.success("LinkedIn login successful! Session saved.")
+                    st.rerun()
+                elif not any("NEED_2FA" in l for l in log_lines):
+                    st.error("Login failed. If you see a CAPTCHA/challenge, use the Cookie method instead.")
+                    st.code("\n".join(log_lines))
 
     if LINKEDIN_PROFILE.exists():
         files = list(LINKEDIN_PROFILE.iterdir())
