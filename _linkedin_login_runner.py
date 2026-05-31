@@ -3,8 +3,13 @@ from __future__ import annotations
 
 import json
 import pathlib
+import subprocess
 import sys
 import time
+
+# Ensure Chromium binary is present (Streamlit Cloud doesn't pre-install it).
+subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+               capture_output=True)
 
 from playwright.sync_api import sync_playwright
 

@@ -12,6 +12,17 @@ from pathlib import Path
 
 import streamlit as st
 
+# Install Playwright browser binary on first cold start (Streamlit Cloud doesn't run
+# `playwright install` automatically, so we do it once here before any browser call).
+_pw_flag = Path(tempfile.gettempdir()) / ".pw_chromium_installed"
+if not _pw_flag.exists():
+    _result = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+        capture_output=True, text=True,
+    )
+    if _result.returncode == 0:
+        _pw_flag.write_text("ok")
+
 PROJECT_ROOT = Path(__file__).parent
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 ENV_PATH = PROJECT_ROOT / ".env"
