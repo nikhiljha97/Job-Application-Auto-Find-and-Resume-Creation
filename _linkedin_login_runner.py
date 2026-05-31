@@ -50,11 +50,44 @@ with sync_playwright() as p:
     page = ctx.new_page()
 
     print("Navigating to LinkedIn login…", flush=True)
-    page.goto("https://www.linkedin.com/login", timeout=30000)
-    page.wait_for_timeout(2000)
+    page.goto("https://www.linkedin.com/login", timeout=60000)
+    page.wait_for_timeout(3000)
 
-    page.fill("#username", email)
-    page.fill("#password", password)
+    print(f"Page URL: {page.url}", flush=True)
+    print(f"Page title: {page.title()}", flush=True)
+
+    # Try multiple selector strategies — LinkedIn sometimes changes its DOM
+    username_sel = (
+        "#username"
+        if page.query_selector("#username")
+        else "input[name='session_key']"
+        if page.query_selector("input[name='session_key']")
+        else "input[type='email']"
+        if page.query_selector("input[type='email']")
+        else None
+    )
+    password_sel = (
+        "#password"
+        if page.query_selector("#password")
+        else "input[name='session_password']"
+        if page.query_selector("input[name='session_password']")
+        else "input[type='password']"
+        if page.query_selector("input[type='password']")
+        else None
+    )
+
+    print(f"Username selector found: {username_sel}", flush=True)
+    print(f"Password selector found: {password_sel}", flush=True)
+
+    if not username_sel or not password_sel:
+        # Print page content snippet for debugging
+        content = page.content()
+        print(f"Page content snippet: {content[:800]}", flush=True)
+        print("LOGIN_FAILED: login form not found — LinkedIn may be showing a CAPTCHA or bot-check page", flush=True)
+        sys.exit(1)
+
+    page.fill(username_sel, email)
+    page.fill(password_sel, password)
     page.click('[type="submit"]')
     print("Submitted credentials, waiting…", flush=True)
     page.wait_for_timeout(4000)
