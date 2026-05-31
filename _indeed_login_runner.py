@@ -2,14 +2,20 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import time
 
+# Force a consistent browser path to avoid user-mismatch on Streamlit Cloud.
+_PW_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/tmp/ms-playwright")
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _PW_PATH
+
 # Ensure Chromium binary is present (Streamlit Cloud doesn't pre-install it).
 subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-               capture_output=True)
+               capture_output=True,
+               env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": _PW_PATH})
 
 from playwright.sync_api import sync_playwright
 
@@ -38,6 +44,7 @@ with sync_playwright() as p:
     page.goto("https://secure.indeed.com/account/login", timeout=30000)
     page.wait_for_timeout(2000)
 
+    # Step 1: enter email
     email_input = page.query_selector("input[type='email'], input[name='__email']")
     if email_input:
         email_input.fill(email)
@@ -46,6 +53,7 @@ with sync_playwright() as p:
             continue_btn.click()
             page.wait_for_timeout(2000)
 
+    # Step 2: enter password
     password_input = page.query_selector("input[type='password'], input[name='__password']")
     if password_input:
         password_input.fill(password)

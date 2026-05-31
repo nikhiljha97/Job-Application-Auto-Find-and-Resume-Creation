@@ -12,13 +12,19 @@ from pathlib import Path
 
 import streamlit as st
 
-# Install Playwright browser binary on first cold start (Streamlit Cloud doesn't run
-# `playwright install` automatically, so we do it once here before any browser call).
-_pw_flag = Path(tempfile.gettempdir()) / ".pw_chromium_installed"
+# Force Playwright to use a writable, consistent path for browser binaries.
+# Streamlit Cloud runs as 'adminuser' but the default cache path can resolve to
+# '/home/appuser/.cache/ms-playwright' causing a user-mismatch. Overriding to /tmp fixes it.
+_PW_BROWSERS_PATH = "/tmp/ms-playwright"
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _PW_BROWSERS_PATH
+
+# Install Playwright browser binary on first cold start.
+_pw_flag = Path(tempfile.gettempdir()) / ".pw_chromium_installed_v2"
 if not _pw_flag.exists():
     _result = subprocess.run(
         [sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
         capture_output=True, text=True,
+        env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": _PW_BROWSERS_PATH},
     )
     if _result.returncode == 0:
         _pw_flag.write_text("ok")
@@ -39,7 +45,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 def load_config() -> dict:
     if CONFIG_PATH.exists():
@@ -152,7 +158,8 @@ def _run_login(runner_script: Path, email: str, password: str, profile_dir: Path
         [sys.executable, "-u", str(runner_script),
          str(creds_file), str(twofa_req), str(twofa_resp), str(profile_dir)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        env={**os.environ, "PYTHONUNBUFFERED": "1",
+             "PLAYWRIGHT_BROWSERS_PATH": _PW_BROWSERS_PATH},
     )
 
     log_area = st.empty()
@@ -197,7 +204,7 @@ def _run_login(runner_script: Path, email: str, password: str, profile_dir: Path
     return success, log_lines
 
 
-# ── sidebar nav ──────────────────────────────────────────────────────────────
+# ── sidebar nav ───────────────────────────────────────────────────────────────
 
 page = st.sidebar.radio(
     "Navigation",
@@ -226,7 +233,7 @@ if excel_path.exists():
     mtime = time.strftime("%b %d %H:%M", time.localtime(excel_path.stat().st_mtime))
     st.sidebar.caption(f"Last Excel: {mtime}")
 
-# ── dashboard ────────────────────────────────────────────────────────────────
+# ── dashboard ─────────────────────────────────────────────────────────────────
 
 if page == "🏠 Dashboard":
     st.title("Job Application Scanner")
@@ -320,6 +327,8 @@ if page == "🏠 Dashboard":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
+# ── linkedin login ────────────────────────────────────────────────────────────
+
 elif page == "🔐 LinkedIn Login":
     st.title("LinkedIn Login")
 
@@ -356,6 +365,8 @@ elif page == "🔐 LinkedIn Login":
         files = list(LINKEDIN_PROFILE.iterdir())
         st.caption(f"Profile: `{LINKEDIN_PROFILE}` — {len(files)} files stored")
 
+# ── indeed login ──────────────────────────────────────────────────────────────
+
 elif page == "🔐 Indeed Login":
     st.title("Indeed Login")
 
@@ -391,6 +402,8 @@ elif page == "🔐 Indeed Login":
     if INDEED_PROFILE.exists():
         files = list(INDEED_PROFILE.iterdir())
         st.caption(f"Profile: `{INDEED_PROFILE}` — {len(files)} files stored")
+
+# ── run scanner ───────────────────────────────────────────────────────────────
 
 elif page == "▶️ Run Scanner":
     st.title("Run Scanner")
@@ -467,6 +480,8 @@ elif page == "▶️ Run Scanner":
         if overall_ok:
             st.balloons()
             st.success("All scans finished. Check the Results tab.")
+
+# ── results ───────────────────────────────────────────────────────────────────
 
 elif page == "📋 Results":
     st.title("Results")
@@ -598,6 +613,8 @@ elif page == "📋 Results":
             st.download_button("Download Full Excel", fh.read(), "linkedin_job_results.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+# ── configuration ─────────────────────────────────────────────────────────────
+
 elif page == "⚙️ Configuration":
     st.title("Configuration")
     st.caption("Changes are saved to `config.json` in the project root.")
@@ -677,6 +694,8 @@ elif page == "⚙️ Configuration":
 
     with st.expander("Raw JSON"):
         st.json(cfg)
+
+# ── notifications ─────────────────────────────────────────────────────────────
 
 elif page == "🔔 Notifications":
     st.title("Notifications")
