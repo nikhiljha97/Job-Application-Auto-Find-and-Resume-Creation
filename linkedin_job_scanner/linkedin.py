@@ -382,7 +382,15 @@ class LinkedInScanner:
         except Exception:
             return []
 
+    def _wait_for_job_cards(self, page: Any, timeout_ms: int = 20_000) -> None:
+        """Wait for LinkedIn's React SPA to render job card links before scraping."""
+        try:
+            page.wait_for_selector("a[href*='/jobs/view/']", timeout=timeout_ms)
+        except Exception:
+            pass  # proceed anyway — some pages may have zero results
+
     def _collect_current_page_results(self, page: Any) -> list[dict[str, Any]]:
+        self._wait_for_job_cards(page)
         seen: dict[str, dict[str, Any]] = {}
         for _ in range(14):
             for item in self._collect_search_results(page):
@@ -822,7 +830,7 @@ CARD_EVALUATE_JS = """
     : root.querySelector("a[href*='/jobs/view/']");
   const jobId = root.getAttribute("data-occludable-job-id")
     || root.dataset.jobId
-    || (link && (link.href.match(/\\/jobs\\/view\\/(\\d+)/) || [])[1])
+    || (link && (link.href.match(/[/]jobs[/]view[/](\d+)/) || [])[1])
     || "";
   return {
     job_id: jobId,
@@ -863,7 +871,7 @@ COLLECT_SEARCH_RESULTS_JS = """
   const anchors = Array.from(document.querySelectorAll("a[href*='/jobs/view/']"));
   for (const link of anchors) {
     const href = link.href || "";
-    const match = href.match(/\\/jobs\\/view\\/(\\d+)/);
+    const match = href.match(/[/]jobs[/]view[/](\d+)/);
     if (!match) continue;
     const jobId = match[1];
     if (seen.has(jobId)) continue;
