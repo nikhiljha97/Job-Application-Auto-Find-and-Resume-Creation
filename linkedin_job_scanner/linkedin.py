@@ -68,7 +68,6 @@ class LinkedInScanner:
                 print(f"  Found {len(card_data)} job cards on page {page_index + 1}")
 
                 if not card_data:
-                    # Debug: show a snippet of what's on the page
                     try:
                         snippet = page.evaluate("() => document.title + ' | ' + document.body.innerText.slice(0, 300)")
                         print(f"  Page snippet: {snippet[:300]}", flush=True)
@@ -199,18 +198,12 @@ class LinkedInScanner:
             viewport={"width": 1440, "height": 1100},
             slow_mo=60,
         )
-        # Only inject cookies.json if the persistent profile doesn't already have
-        # a live LinkedIn session. Re-injecting every run creates a new session
-        # event that causes LinkedIn to invalidate the user's browser session.
         cookies_file = self.profile_dir / "cookies.json"
         if cookies_file.exists() and not self._profile_has_linkedin_session(ctx):
             import json as _json
             try:
                 ctx.add_cookies(_json.loads(cookies_file.read_text()))
                 print("Injected saved LinkedIn cookie into fresh profile session.", flush=True)
-                # Delete cookies.json so future scans reuse the profile's stored
-                # session instead of re-injecting (re-injection creates a new
-                # LinkedIn session event that logs out the user's own browser).
                 try:
                     cookies_file.unlink()
                     print("cookies.json removed — profile session is now self-contained.", flush=True)
@@ -255,7 +248,6 @@ class LinkedInScanner:
         if not needs_login:
             return
 
-        # Try re-injecting cookies and reloading before giving up
         cookies_file = self.profile_dir / "cookies.json"
         if cookies_file.exists():
             import json as _json
@@ -329,6 +321,13 @@ class LinkedInScanner:
 
     # ------------------------------------------------------------------ scraping
 
+    def _wait_for_job_cards(self, page: Any, timeout_ms: int = 20_000) -> None:
+        """Wait for LinkedIn's React SPA to render job card links before scraping."""
+        try:
+            page.wait_for_selector("a[href*='/jobs/view/']", timeout=timeout_ms)
+        except Exception:
+            pass  # proceed anyway; some pages may genuinely have zero results
+
     def _load_visible_cards(self, page: Any) -> None:
         for _ in range(10):
             try:
@@ -354,6 +353,7 @@ class LinkedInScanner:
             return []
 
     def _collect_current_page_results(self, page: Any) -> list[dict[str, Any]]:
+        self._wait_for_job_cards(page)
         seen: dict[str, dict[str, Any]] = {}
         for _ in range(14):
             for item in self._collect_search_results(page):
@@ -623,8 +623,36 @@ def optional_int(value: Any) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# JavaScript constants (triple-quoted so \d etc. are literal JS regex chars)
+# JavaScript constants
+# Note: JS regex forward slashes written as [/] to avoid Python \/ escape warning
 # ---------------------------------------------------------------------------
+
+CARD_EVALUATE_JS = """
+(el) => {
+  const root = el.closest("li[data-occludable-job-id], .job-card-container, [data-job-id], li, div") || el;
+  const text = (selector) => {
+    const node = root.querySelector(selector);
+    return node ? node.innerText.trim() : "";
+  };
+  const link = el.matches && el.matches("a[href*='/jobs/view/']")
+    ? el
+    : root.querySelector("a[href*='/jobs/view/']");
+  const jobId = root.getAttribute("data-occludable-job-id")
+    || root.dataset.jobId
+    || (link && (link.href.match(/[/]jobs[/]view[/](\\d+)/) || [])[1])
+    || "";
+  return {
+    job_id: jobId,
+    title: text(".job-card-list__title, .job-card-container__link, a[href*='/jobs/view/']") || (link ? link.innerText.trim() : ""),
+    company: text(".artdeco-entity-lockup__subtitle, .job-card-container__primary-description, .job-card-container__company-name"),
+    location: text(".artdeco-entity-lockup__caption, .job-card-container__metadata-item"),
+    listed_at: text("time, .job-card-container__listed-time"),
+    url: link ? link.href : "",
+    description: root.innerText || el.innerText || ""
+  };
+}
+"""
+
 
 COLLECT_SEARCH_RESULTS_JS = """
 () => {
@@ -652,7 +680,7 @@ COLLECT_SEARCH_RESULTS_JS = """
   const anchors = Array.from(document.querySelectorAll("a[href*='/jobs/view/']"));
   for (const link of anchors) {
     const href = link.href || "";
-    const match = href.match(/\/jobs\/view\/(\\d+)/);
+    const match = href.match(/[/]jobs[/]view[/](\\d+)/);
     if (!match) continue;
     const jobId = match[1];
     if (seen.has(jobId)) continue;
