@@ -6,7 +6,7 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from .models import JobPosting, utc_now_iso
 
@@ -62,32 +62,19 @@ class LinkedInScanner:
                         print("Page load timed out; continuing with whatever loaded.")
 
                 self._wait_for_login_if_needed(page, headless=headless)
-                self._load_visible_cards(page)
+                print(f"  Page URL after login check: {page.url}", flush=True)
 
                 card_data = self._collect_current_page_results(page)
+                print(f"  Found {len(card_data)} job cards on page {page_index + 1}")
+
                 if not card_data:
-                    details = self._extract_details(page)
-                    direct_url = normalize_job_url(details.get("url", ""), "")
-                    direct_job_id = normalize_job_id("", direct_url)
-                    if details.get("title") and direct_url:
-                        jobs[direct_job_id or direct_url] = JobPosting(
-                            job_id=direct_job_id or direct_url,
-                            title=clean_title(details.get("title", "")),
-                            company=clean_text(details.get("company", "")),
-                            location=clean_text(details.get("location", "")),
-                            url=direct_url,
-                            description=clean_text(details.get("description", "")),
-                            source_url=page_url,
-                            scraped_at=utc_now_iso(),
-                            easy_apply=bool(details.get("easy_apply", False)),
-                            accepting_applications=bool(details.get("accepting_applications", True)),
-                            application_status=clean_text(str(details.get("application_status", "Unknown"))),
-                            applicant_count=optional_int(details.get("applicant_count")),
-                            applicant_count_text=clean_text(str(details.get("applicant_count_text", ""))),
-                        )
-                        print("Collected 1 direct job from this page.")
-                        continue
-                    print("No job cards found on this page; stopping pagination.")
+                    # Debug: show a snippet of what's on the page
+                    try:
+                        snippet = page.evaluate("() => document.title + ' | ' + document.body.innerText.slice(0, 300)")
+                        print(f"  Page snippet: {snippet[:300]}", flush=True)
+                    except Exception:
+                        pass
+                    print(f"  No job cards found on page {page_index + 1}; stopping pagination.")
                     break
 
                 page_job_count = 0
@@ -103,7 +90,7 @@ class LinkedInScanner:
                         self._safe_goto(detail_page, job_url, timeout=20_000, retries=0)
                         detail_page.wait_for_timeout(1_200)
                     except Exception as exc:
-                        print(f"Could not open job {index}: {job_url} ({exc})")
+                        print(f"  Could not open job {index}: {job_url} ({exc})")
                         continue
 
                     details = self._extract_details(detail_page)
@@ -112,9 +99,7 @@ class LinkedInScanner:
                     location = details.get("location") or data.get("location") or ""
                     description = details.get("description") or data.get("description") or ""
                     final_url = normalize_job_url(details.get("url") or job_url, job_id)
-                    accepting_applications = bool(details.get("accepting_applications", True)) and bool(
-                        data.get("accepting_applications", True)
-                    )
+                    accepting = bool(details.get("accepting_applications", True)) and bool(data.get("accepting_applications", True))
                     applicant_count = optional_int(details.get("applicant_count"))
                     applicant_count_text = clean_text(str(details.get("applicant_count_text", "")))
                     if applicant_count is None:
@@ -138,7 +123,7 @@ class LinkedInScanner:
                         scraped_at=utc_now_iso(),
                         listed_at=clean_text(str(data.get("listed_at", ""))),
                         easy_apply=bool(details.get("easy_apply", False)),
-                        accepting_applications=accepting_applications,
+                        accepting_applications=accepting,
                         application_status=application_status,
                         applicant_count=applicant_count,
                         applicant_count_text=applicant_count_text,
@@ -146,12 +131,12 @@ class LinkedInScanner:
                     page_job_count += 1
                 detail_page.close()
 
-                print(f"Collected {page_job_count} new jobs from page {page_index + 1}.")
+                print(f"  Collected {page_job_count} new jobs from page {page_index + 1}.")
                 if page_job_count == 0:
                     break
                 if use_ui_flow and page_index < max_pages - 1:
-                    if not self._go_to_results_page(page, page_index + 2):
-                        print("No next results page found; stopping pagination.")
+                    if not self._go_to_next_page(page, page_index + 2):
+                        print("  No next results page found; stopping pagination.")
                         break
 
             context.close()
@@ -181,17 +166,19 @@ class LinkedInScanner:
                     details = self._extract_details(page)
                     job.accepting_applications = bool(details.get("accepting_applications", job.accepting_applications))
                     job.application_status = clean_text(str(details.get("application_status", job.application_status)))
-                    applicant_count = optional_int(details.get("applicant_count"))
-                    if applicant_count is not None:
-                        job.applicant_count = applicant_count
-                    applicant_count_text = clean_text(str(details.get("applicant_count_text", "")))
-                    if applicant_count_text:
-                        job.applicant_count_text = applicant_count_text
+                    cnt = optional_int(details.get("applicant_count"))
+                    if cnt is not None:
+                        job.applicant_count = cnt
+                    cnt_text = clean_text(str(details.get("applicant_count_text", "")))
+                    if cnt_text:
+                        job.applicant_count_text = cnt_text
                     if index % 5 == 0 or index == len(jobs):
                         print(f"Revalidated {index}/{len(jobs)} jobs.")
                 except Exception as exc:
                     print(f"Could not revalidate job {index} ({job.url}): {exc}")
             context.close()
+
+    # ------------------------------------------------------------------ context
 
     def _launch_context(self, playwright: Any, headless: bool) -> Any:
         try:
@@ -208,6 +195,7 @@ class LinkedInScanner:
         ctx = playwright.chromium.launch_persistent_context(
             str(self.profile_dir),
             headless=headless,
+            args=["--no-sandbox", "--disable-setuid-sandbox"],
             viewport={"width": 1440, "height": 1100},
             slow_mo=60,
         )
@@ -233,7 +221,6 @@ class LinkedInScanner:
         return ctx
 
     def _profile_has_linkedin_session(self, ctx: Any) -> bool:
-        """Return True if the persistent profile already has a live li_at cookie."""
         try:
             for cookie in ctx.cookies("https://www.linkedin.com"):
                 if cookie.get("name") == "li_at" and cookie.get("value"):
@@ -252,16 +239,18 @@ class LinkedInScanner:
         )
         return any(marker in text for marker in markers)
 
+    # ------------------------------------------------------------------ login
+
     def _wait_for_login_if_needed(self, page: Any, headless: bool) -> None:
-        login_markers = ["input#username", "input[name='session_key']"]
         needs_login = "login" in page.url.lower() or "authwall" in page.url.lower()
-        for selector in login_markers:
-            try:
-                if page.locator(selector).count() > 0:
-                    needs_login = True
-                    break
-            except Exception:
-                continue
+        if not needs_login:
+            for selector in ("input#username", "input[name='session_key']"):
+                try:
+                    if page.locator(selector).count() > 0:
+                        needs_login = True
+                        break
+                except Exception:
+                    continue
 
         if not needs_login:
             return
@@ -272,14 +261,10 @@ class LinkedInScanner:
             import json as _json
             try:
                 page.context.add_cookies(_json.loads(cookies_file.read_text()))
-                page.reload(wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(2000)
-                still_needs_login = "login" in page.url.lower() or "authwall" in page.url.lower()
-                if not still_needs_login:
+                page.reload(wait_until="domcontentloaded", timeout=30_000)
+                page.wait_for_timeout(2_000)
+                if "login" not in page.url.lower() and "authwall" not in page.url.lower():
                     print("LinkedIn session restored from saved cookies.", flush=True)
-                    # Remove cookies.json so subsequent scans rely on the stored
-                    # profile session instead of re-injecting and disturbing the
-                    # user's own browser session.
                     try:
                         cookies_file.unlink()
                         print("cookies.json removed — profile session is now self-contained.", flush=True)
@@ -298,6 +283,8 @@ class LinkedInScanner:
         print("Sign in manually, finish any security checks, then return here and press Enter.")
         input("Press Enter after LinkedIn jobs search is visible...")
 
+    # ------------------------------------------------------------------ profile
+
     def _clear_stale_profile_locks(self) -> None:
         lock = self.profile_dir / "SingletonLock"
         if not lock.exists() and not lock.is_symlink():
@@ -305,112 +292,86 @@ class LinkedInScanner:
         if lock.is_symlink():
             target = os.readlink(lock)
             maybe_pid = target.rsplit("-", 1)[-1]
-            try:
-                pid = int(maybe_pid)
-                os.kill(pid, 0)
+            if maybe_pid.isdigit() and _pid_is_running(int(maybe_pid)):
                 return
-            except (ValueError, ProcessLookupError, PermissionError):
+        for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            path = self.profile_dir / name
+            try:
+                path.unlink()
+                print(f"Removed stale LinkedIn browser profile lock: {path.name}")
+            except FileNotFoundError:
                 pass
-        try:
-            lock.unlink(missing_ok=True)
-        except OSError:
-            pass
 
     def _clear_profile_cache_artifacts(self) -> None:
-        for subdir in ("Cache", "Code Cache", "GPUCache", "DawnCache"):
-            artifact = self.profile_dir / subdir
-            if artifact.exists():
-                shutil.rmtree(artifact, ignore_errors=True)
+        artifact_names = (
+            "Local State",
+            "RunningChromeVersion",
+            "GrShaderCache",
+            "ShaderCache",
+            "GraphiteDawnCache",
+            "Default/GPUCache",
+            "Default/Cache",
+            "Default/Code Cache",
+            "Default/DawnCache",
+            "Default/Service Worker/CacheStorage",
+        )
+        for name in artifact_names:
+            artifact = self.profile_dir / name
+            try:
+                if artifact.is_dir() and not artifact.is_symlink():
+                    shutil.rmtree(artifact)
+                    print(f"Removed stale Chromium profile artifact: {name}")
+                else:
+                    artifact.unlink()
+                    print(f"Removed stale Chromium profile artifact: {name}")
+            except FileNotFoundError:
+                pass
+
+    # ------------------------------------------------------------------ scraping
 
     def _load_visible_cards(self, page: Any) -> None:
-        wait_ms = int(float(self.config.get("wait_seconds_after_action", 10)) * 1000)
+        for _ in range(10):
+            try:
+                page.evaluate(SCROLL_RESULTS_LIST_JS)
+                page.wait_for_timeout(600)
+            except Exception:
+                break
         try:
-            page.wait_for_selector(CARD_SELECTOR, timeout=wait_ms)
+            page.evaluate("() => window.scrollTo(0, 0)")
         except Exception:
             pass
-        for _ in range(3):
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(1_500)
-        page.evaluate("window.scrollTo(0, 0)")
-        page.wait_for_timeout(500)
 
-    def _collect_current_page_results(self, page: Any) -> list[dict]:
-        return page.evaluate(
-            """
-            () => {
-                const cards = Array.from(document.querySelectorAll(
-                    'li[data-occludable-job-id], .jobs-search-results__list-item, .job-card-container, [data-job-id]'
-                ));
-                return cards.map(card => {
-                    const jobId = card.getAttribute('data-occludable-job-id')
-                        || card.getAttribute('data-job-id')
-                        || '';
-                    const anchor = card.querySelector('a[href*="/jobs/view/"]');
-                    const url = anchor ? anchor.href : '';
-                    const titleEl = card.querySelector('.job-card-list__title, .job-card-container__link, h3, h4');
-                    const title = titleEl ? titleEl.innerText.trim() : '';
-                    const companyEl = card.querySelector('.job-card-container__company-name, .job-card-container__primary-description, [data-control-name="job_card_company_name"]');
-                    const company = companyEl ? companyEl.innerText.trim() : '';
-                    const locationEl = card.querySelector('.job-card-container__metadata-item, .artdeco-entity-lockup__caption');
-                    const location = locationEl ? locationEl.innerText.trim() : '';
-                    const listedEl = card.querySelector('time, .job-card-container__listed-status');
-                    const listedAt = listedEl ? (listedEl.getAttribute('datetime') || listedEl.innerText.trim()) : '';
-                    const easyApplyEl = card.querySelector('.job-card-container__apply-method');
-                    const easyApply = easyApplyEl ? easyApplyEl.innerText.toLowerCase().includes('easy apply') : false;
-                    const applicantEl = card.querySelector('.job-card-container__applicant-count, .tvm__text');
-                    const applicantText = applicantEl ? applicantEl.innerText.trim() : '';
-                    const applicantMatch = applicantText.match(/(\d[\d,]*)/);
-                    const applicantCount = applicantMatch ? parseInt(applicantMatch[1].replace(/,/g, ''), 10) : null;
-                    return { job_id: jobId, url, title, company, location, listed_at: listedAt, easy_apply: easyApply, applicant_count: applicantCount, applicant_count_text: applicantText, accepting_applications: true, application_status: 'Unknown' };
-                }).filter(j => j.url || j.job_id);
-            }
-            """
-        )
-
-    def _extract_details(self, page: Any) -> dict:
-        return page.evaluate(
-            """
-            () => {
-                const titleEl = document.querySelector('.job-details-jobs-unified-top-card__job-title, h1.t-24, h1');
-                const title = titleEl ? titleEl.innerText.trim() : '';
-                const companyEl = document.querySelector('.job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name, a[data-tracking-control-name="public_jobs_topcard-org-name"]');
-                const company = companyEl ? companyEl.innerText.trim() : '';
-                const locationEl = document.querySelector('.job-details-jobs-unified-top-card__bullet, .jobs-unified-top-card__bullet, .job-details-jobs-unified-top-card__primary-description-container');
-                const location = locationEl ? locationEl.innerText.trim() : '';
-                const descEl = document.querySelector('.jobs-description-content__text, .jobs-description__content, #job-details');
-                const description = descEl ? descEl.innerText.trim() : '';
-                const easyApplyBtn = document.querySelector('.jobs-apply-button--top-card, .jobs-s-apply button');
-                const easyApply = easyApplyBtn ? easyApplyBtn.innerText.toLowerCase().includes('easy apply') : false;
-                const closedEl = document.querySelector('.artdeco-inline-feedback--error, .jobs-s-apply__application-closed');
-                const acceptingApplications = !closedEl;
-                const statusEl = document.querySelector('.jobs-s-apply__application-status, .artdeco-inline-feedback');
-                const applicationStatus = statusEl ? statusEl.innerText.trim() : 'Unknown';
-                const applicantEl = document.querySelector('.jobs-unified-top-card__applicant-count, .tvm__text--neutral, .jobs-details-top-card__apply-count');
-                const applicantText = applicantEl ? applicantEl.innerText.trim() : '';
-                const applicantMatch = applicantText.match(/(\d[\d,]*)/);
-                const applicantCount = applicantMatch ? parseInt(applicantMatch[1].replace(/,/g, ''), 10) : null;
-                const canonicalEl = document.querySelector('link[rel="canonical"]');
-                const url = canonicalEl ? canonicalEl.href : window.location.href;
-                return { title, company, location, description, url, easy_apply: easyApply, accepting_applications: acceptingApplications, application_status: applicationStatus, applicant_count: applicantCount, applicant_count_text: applicantText };
-            }
-            """
-        )
-
-    def _go_to_results_page(self, page: Any, page_number: int) -> bool:
+    def _extract_details(self, page: Any) -> dict[str, Any]:
         try:
-            next_btn = page.locator(f'button[aria-label="Page {page_number}"]')
-            if next_btn.count() > 0:
-                next_btn.first.click()
-                page.wait_for_timeout(3_000)
-                return True
-            next_btn2 = page.locator('button[aria-label="Next"]')
-            if next_btn2.count() > 0:
-                next_btn2.first.click()
-                page.wait_for_timeout(3_000)
-                return True
+            return page.evaluate(DETAIL_EVALUATE_JS)
+        except Exception:
+            return {}
+
+    def _collect_search_results(self, page: Any) -> list[dict[str, Any]]:
+        try:
+            return page.evaluate(COLLECT_SEARCH_RESULTS_JS)
+        except Exception:
+            return []
+
+    def _collect_current_page_results(self, page: Any) -> list[dict[str, Any]]:
+        seen: dict[str, dict[str, Any]] = {}
+        for _ in range(14):
+            for item in self._collect_search_results(page):
+                job_id = normalize_job_id(str(item.get("job_id", "")), str(item.get("url", "")))
+                url = normalize_job_url(str(item.get("url", "")), job_id)
+                key = job_id or url
+                if key:
+                    seen[key] = item
+            try:
+                page.evaluate(SCROLL_RESULTS_LIST_JS)
+                page.wait_for_timeout(800)
+            except Exception:
+                break
+        try:
+            page.evaluate("() => window.scrollTo(0, 0)")
         except Exception:
             pass
-        return False
+        return list(seen.values())
 
     def _open_search_with_filters(self, page: Any, headless: bool) -> None:
         wait_ms = int(float(self.config.get("wait_seconds_after_action", 10)) * 1000)
@@ -433,9 +394,11 @@ class LinkedInScanner:
                 page.wait_for_timeout(wait_ms)
             except RuntimeError as exc:
                 print(f"LinkedIn search box unavailable; using direct filtered search URL instead: {exc}")
-            print("Applying LinkedIn filters by URL: Last 24 hours, employment types except Internship, Entry-level + Manager")
-            self._safe_goto(page, build_filtered_search_url(search_query, self.config), timeout=30_000)
+            filtered_url = build_filtered_search_url(search_query, self.config)
+            print(f"Applying LinkedIn filters by URL: {filtered_url}")
+            self._safe_goto(page, filtered_url, timeout=30_000)
             page.wait_for_timeout(wait_ms)
+            print(f"  After filter URL navigation, page URL: {page.url}", flush=True)
             return
 
         self._fill_search_box(page, search_query)
@@ -472,6 +435,11 @@ class LinkedInScanner:
             except Exception as exc:
                 message = str(exc)
                 if "interrupted by another navigation" in message:
+                    print(f"Navigation superseded; continuing: {url}")
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=5_000)
+                    except Exception:
+                        page.wait_for_timeout(3_000)
                     return True
                 if attempt < retries:
                     page.wait_for_timeout(2_000)
@@ -543,17 +511,40 @@ class LinkedInScanner:
         except Exception as exc:
             print(f"Could not apply filter '{filter_name}': {exc}")
 
+    def _go_to_next_page(self, page: Any, page_number: int) -> bool:
+        try:
+            btn = page.locator(f'button[aria-label="Page {page_number}"]')
+            if btn.count() > 0:
+                btn.first.click()
+                page.wait_for_timeout(3_000)
+                return True
+            btn2 = page.locator('button[aria-label="Next"]')
+            if btn2.count() > 0:
+                btn2.first.click()
+                page.wait_for_timeout(3_000)
+                return True
+        except Exception:
+            pass
+        return False
+
 
 # ---------------------------------------------------------------------------
-# URL helpers
+# Helpers
 # ---------------------------------------------------------------------------
+
+
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
 
 
 def normalize_search_url(url: str) -> str:
     if not url or url == "sample://linkedin":
         return url
-    parsed = urlparse(url)
-    if not parsed.scheme:
+    if not urlparse(url).scheme:
         url = "https://" + url
     return url
 
@@ -571,12 +562,10 @@ def normalize_job_url(url: str, job_id: str) -> str:
 
 
 def normalize_job_id(job_id: str, url: str) -> str:
-    if job_id and job_id.isdigit():
+    if job_id and re.match(r"^\d+$", job_id):
         return job_id
-    match = re.search(r"/jobs/view/(\d+)", url)
-    if match:
-        return match.group(1)
-    return job_id
+    m = re.search(r"/jobs/view/(\d+)", url)
+    return m.group(1) if m else job_id
 
 
 def with_start(url: str, start: int) -> str:
@@ -593,21 +582,18 @@ def build_search_url(query: str, location: str) -> str:
 
 def build_filtered_search_url(query: str, config: dict) -> str:
     location = str(config.get("linkedin_location", "Canada")).strip()
-    params: dict[str, str] = {
-        "keywords": query,
-        "location": location,
-    }
-    if config.get("date_posted"):
-        date_map = {"Past 24 hours": "r86400", "Past week": "r604800", "Past month": "r2592000"}
-        params["f_TPR"] = date_map.get(str(config["date_posted"]), "r86400")
-    else:
-        params["f_TPR"] = "r86400"
-    emp_map = {"Full-time": "F", "Part-time": "P", "Contract": "C", "Temporary": "T", "Internship": "I", "Volunteer": "V", "Other": "O"}
+    params: dict[str, str] = {"keywords": query, "location": location}
+    date_map = {"Past 24 hours": "r86400", "Past week": "r604800", "Past month": "r2592000",
+                "Past Week": "r604800", "Past Month": "r2592000"}
+    params["f_TPR"] = date_map.get(str(config.get("date_posted", "")), "r86400")
+    emp_map = {"Full-time": "F", "Part-time": "P", "Contract": "C", "Temporary": "T",
+               "Internship": "I", "Volunteer": "V", "Other": "O"}
     employment_types = [str(e) for e in config.get("employment_types", ["Full-time", "Contract", "Part-time"])]
     emp_codes = [emp_map[e] for e in employment_types if e in emp_map]
     if emp_codes:
         params["f_JT"] = ",".join(emp_codes)
-    exp_map = {"Internship": "1", "Entry level": "2", "Associate": "3", "Mid-Senior level": "4", "Director": "5", "Executive": "6"}
+    exp_map = {"Internship": "1", "Entry level": "2", "Entry-level": "2", "Associate": "3",
+               "Mid-Senior level": "4", "Director": "5", "Executive": "6", "Manager": "4"}
     experience_levels = [str(e) for e in config.get("experience_levels", ["Entry level", "Associate", "Mid-Senior level", "Director"])]
     exp_codes = [exp_map[e] for e in experience_levels if e in exp_map]
     if exp_codes:
@@ -615,20 +601,14 @@ def build_filtered_search_url(query: str, config: dict) -> str:
     return f"https://www.linkedin.com/jobs/search/?{urlencode(params)}"
 
 
-# ---------------------------------------------------------------------------
-# Text helpers
-# ---------------------------------------------------------------------------
-
-
 def clean_text(text: str) -> str:
     if not text:
         return ""
-    return " ".join(text.split())
+    return " ".join(str(text).split())
 
 
 def clean_title(text: str) -> str:
     text = clean_text(text)
-    # Remove LinkedIn "· Easy Apply" suffix variants
     text = re.sub(r"\s*·\s*Easy Apply\s*$", "", text, flags=re.IGNORECASE)
     return text.strip()
 
@@ -640,3 +620,164 @@ def optional_int(value: Any) -> int | None:
         return int(str(value).replace(",", ""))
     except (ValueError, TypeError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# JavaScript constants (triple-quoted so \d etc. are literal JS regex chars)
+# ---------------------------------------------------------------------------
+
+COLLECT_SEARCH_RESULTS_JS = """
+() => {
+  const seen = new Set();
+  const rows = [];
+  const parseApplicants = (text) => {
+    const compact = (text || "").replace(/\\s+/g, " ");
+    const patterns = [
+      /over\\s+([\\d,]+)\\s+(?:applicants?|people clicked apply)/i,
+      /be among (?:the )?first\\s+([\\d,]+)\\s+(?:applicants?|people clicked apply)/i,
+      /([\\d,]+)\\s+(?:applicants?|people clicked apply)/i
+    ];
+    for (const pattern of patterns) {
+      const match = compact.match(pattern);
+      if (!match) continue;
+      const value = parseInt(match[1].replace(/,/g, ""), 10);
+      if (!Number.isFinite(value)) continue;
+      return {
+        count: pattern.source.startsWith("over") ? value + 1 : value,
+        text: match[0]
+      };
+    }
+    return { count: null, text: "" };
+  };
+  const anchors = Array.from(document.querySelectorAll("a[href*='/jobs/view/']"));
+  for (const link of anchors) {
+    const href = link.href || "";
+    const match = href.match(/\/jobs\/view\/(\\d+)/);
+    if (!match) continue;
+    const jobId = match[1];
+    if (seen.has(jobId)) continue;
+    seen.add(jobId);
+    const root = link.closest("li[data-occludable-job-id], .job-card-container, [data-job-id], li, div") || link;
+    const text = (selector) => {
+      const node = root.querySelector(selector);
+      return node && node.innerText ? node.innerText.trim() : "";
+    };
+    const rowText = root.innerText || link.innerText || "";
+    const applicants = parseApplicants(rowText);
+    const noLongerAccepting = /no longer accepting applications?/i.test(rowText);
+    rows.push({
+      job_id: root.getAttribute("data-occludable-job-id") || root.dataset.jobId || jobId,
+      title: text(".job-card-list__title, .job-card-container__link, a[href*='/jobs/view/']") || link.innerText.trim(),
+      company: text(".artdeco-entity-lockup__subtitle, .job-card-container__primary-description, .job-card-container__company-name"),
+      location: text(".artdeco-entity-lockup__caption, .job-card-container__metadata-item"),
+      listed_at: text("time, .job-card-container__listed-time"),
+      url: href,
+      description: rowText,
+      accepting_applications: !noLongerAccepting,
+      application_status: noLongerAccepting ? "No Longer Accepting Applications" : "Unknown",
+      applicant_count: applicants.count,
+      applicant_count_text: applicants.text
+    });
+  }
+  return rows;
+}
+"""
+
+
+SCROLL_RESULTS_LIST_JS = """
+() => {
+  const candidates = [
+    document.querySelector('.jobs-search-results-list__list'),
+    document.querySelector('.jobs-search-results-list'),
+    document.querySelector('.scaffold-layout__list'),
+    document.querySelector('.jobs-search-results__list'),
+    ...Array.from(document.querySelectorAll('div, ul')).filter((node) => {
+      const style = window.getComputedStyle(node);
+      return /(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 200;
+    }),
+    document.scrollingElement
+  ].filter(Boolean);
+  let target = candidates[0];
+  for (const candidate of candidates) {
+    if (candidate.querySelector && candidate.querySelector("a[href*='/jobs/view/']")) {
+      target = candidate;
+      break;
+    }
+  }
+  if (target) target.scrollTop = Math.min(target.scrollHeight, target.scrollTop + Math.max(650, target.clientHeight || 650));
+}
+"""
+
+
+DETAIL_EVALUATE_JS = """
+() => {
+  const pickText = (selectors) => {
+    for (const selector of selectors) {
+      const node = document.querySelector(selector);
+      if (node && node.innerText && node.innerText.trim()) return node.innerText.trim();
+    }
+    return "";
+  };
+  const title = pickText([
+    ".jobs-unified-top-card__job-title",
+    ".job-details-jobs-unified-top-card__job-title",
+    "h1"
+  ]);
+  const company = pickText([
+    ".jobs-unified-top-card__company-name",
+    ".job-details-jobs-unified-top-card__company-name",
+    "a[href*='/company/']"
+  ]);
+  const location = pickText([
+    ".jobs-unified-top-card__bullet",
+    ".job-details-jobs-unified-top-card__primary-description-container",
+    ".jobs-unified-top-card__primary-description"
+  ]);
+  const description = pickText([
+    "#job-details",
+    ".jobs-description-content__text",
+    ".jobs-description__content"
+  ]);
+  const url = (document.querySelector('link[rel="canonical"]') || {}).href || window.location.href;
+  const easyApplyBtn = document.querySelector(".jobs-apply-button--top-card, .jobs-s-apply button");
+  const easyApply = easyApplyBtn ? /easy apply/i.test(easyApplyBtn.innerText) : false;
+  const closedEl = document.querySelector(".artdeco-inline-feedback--error, .jobs-s-apply__application-closed");
+  const hasApplyButton = !!document.querySelector(".jobs-apply-button, .jobs-s-apply");
+  const noLongerText = /no longer accepting applications/i.test(document.body.innerText || "");
+  const acceptingApplications = !closedEl && !noLongerText;
+  const applicationStatus = noLongerText
+    ? "No Longer Accepting Applications"
+    : hasApplyButton
+      ? "Accepting Applications"
+      : "No Apply Button Found";
+  const applicantEl = document.querySelector(
+    ".jobs-unified-top-card__applicant-count, .tvm__text--neutral, .jobs-details-top-card__apply-count, .jobs-unified-top-card__subtitle-secondary-grouping"
+  );
+  const applicantText = applicantEl ? applicantEl.innerText.trim() : "";
+  const parseApplicants = (text) => {
+    const compact = (text || "").replace(/\\s+/g, " ");
+    const patterns = [
+      /over\\s+([\\d,]+)\\s+(?:applicants?|people clicked apply)/i,
+      /be among (?:the )?first\\s+([\\d,]+)\\s+(?:applicants?|people clicked apply)/i,
+      /([\\d,]+)\\s+(?:applicants?|people clicked apply)/i
+    ];
+    for (const pattern of patterns) {
+      const match = compact.match(pattern);
+      if (!match) continue;
+      const value = parseInt(match[1].replace(/,/g, ""), 10);
+      if (!Number.isFinite(value)) continue;
+      return { count: value, text: match[0] };
+    }
+    return { count: null, text: "" };
+  };
+  const applicants = parseApplicants(applicantText);
+  return {
+    title, company, location, description, url,
+    easy_apply: easyApply,
+    accepting_applications: acceptingApplications,
+    application_status: applicationStatus,
+    applicant_count: applicants.count,
+    applicant_count_text: applicants.text || applicantText
+  };
+}
+"""
