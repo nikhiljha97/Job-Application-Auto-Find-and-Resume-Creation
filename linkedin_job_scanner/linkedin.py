@@ -194,10 +194,24 @@ class LinkedInScanner:
         ctx = playwright.chromium.launch_persistent_context(
             str(self.profile_dir),
             headless=headless,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                # Suppress the automation flag that LinkedIn detects
+                "--disable-blink-features=AutomationControlled",
+            ],
+            # Suppress navigator.webdriver so LinkedIn's bot detection doesn't block
+            ignore_default_args=["--enable-automation"],
             viewport={"width": 1440, "height": 1100},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
             slow_mo=60,
         )
+        # Override navigator.webdriver on every new page so LinkedIn can't detect headless
+        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         cookies_file = self.profile_dir / "cookies.json"
         if cookies_file.exists() and not self._profile_has_linkedin_session(ctx):
             import json as _json
@@ -624,7 +638,7 @@ def optional_int(value: Any) -> int | None:
 
 # ---------------------------------------------------------------------------
 # JavaScript constants
-# Note: JS regex forward slashes written as [/] to avoid Python \/ escape warning
+# Note: JS regex forward slashes written as [/] to avoid Python escape warning
 # ---------------------------------------------------------------------------
 
 CARD_EVALUATE_JS = """
