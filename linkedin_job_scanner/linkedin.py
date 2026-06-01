@@ -19,6 +19,67 @@ CARD_SELECTOR = (
     "a[href*='/jobs/view/']"
 )
 
+# Comprehensive stealth init script injected before every page load.
+# Patches the most common bot-detection fingerprints LinkedIn checks.
+_STEALTH_INIT_SCRIPT = """
+(function () {
+  // 1. Hide navigator.webdriver
+  Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+
+  // 2. Add window.chrome so the browser looks like real Chrome
+  if (!window.chrome) {
+    window.chrome = {
+      app: {isInstalled: false, InstallState: {DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed'}, RunningState: {CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running'}},
+      csi: function(){},
+      loadTimes: function(){},
+      runtime: {}
+    };
+  }
+
+  // 3. Spoof navigator.plugins to look non-empty
+  if (navigator.plugins.length === 0) {
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => {
+        const arr = [
+          {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format'},
+          {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: ''},
+          {name: 'Native Client', filename: 'internal-nacl-plugin', description: ''}
+        ];
+        arr.__proto__ = PluginArray.prototype;
+        return arr;
+      }
+    });
+  }
+
+  // 4. Languages
+  Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+
+  // 5. Permissions — headless Chrome returns 'denied' for notifications; real Chrome returns 'default'
+  if (navigator.permissions) {
+    const origQuery = navigator.permissions.query.bind(navigator.permissions);
+    navigator.permissions.query = (params) => {
+      if (params && params.name === 'notifications') {
+        return Promise.resolve({state: 'default', onchange: null});
+      }
+      return origQuery(params);
+    };
+  }
+
+  // 6. WebGL vendor/renderer — headless exposes the real GPU string which is a tell
+  try {
+    const getParam = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(param) {
+      if (param === 37445) return 'Intel Inc.';          // UNMASKED_VENDOR_WEBGL
+      if (param === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+      return getParam.call(this, param);
+    };
+  } catch(e) {}
+
+  // 7. Hide hairline feature (headless-only property)
+  Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 1});
+})();
+"""
+
 
 class LinkedInScanner:
     def __init__(self, config: dict[str, Any], known_job_keys: set[str] | None = None) -> None:
@@ -87,6 +148,13 @@ class LinkedInScanner:
                         )
                         print("Collected 1 direct job from this page.")
                         continue
+                    # Debug: show page URL and content snippet to diagnose bot blocks
+                    try:
+                        snippet = page.evaluate("() => document.body.innerText.slice(0, 300)")
+                    except Exception:
+                        snippet = "(could not read page body)"
+                    print(f"  Page URL after wait: {page.url}", flush=True)
+                    print(f"  Page body snippet: {repr(snippet[:200])}", flush=True)
                     print("No job cards found on this page; stopping pagination.")
                     break
 
@@ -216,10 +284,11 @@ class LinkedInScanner:
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                # Suppress the automation flag that LinkedIn detects
                 "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--window-size=1440,1100",
+                "--start-maximized",
             ],
-            # Suppress navigator.webdriver so LinkedIn's bot detection doesn't block
             ignore_default_args=["--enable-automation"],
             viewport={"width": 1440, "height": 1100},
             user_agent=(
@@ -227,10 +296,9 @@ class LinkedInScanner:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/124.0.0.0 Safari/537.36"
             ),
-            slow_mo=60,
+            slow_mo=80,
         )
-        # Override navigator.webdriver on every new page so LinkedIn can't detect headless
-        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        ctx.add_init_script(_STEALTH_INIT_SCRIPT)
         # Only inject cookies.json if the persistent profile doesn't already have
         # a live LinkedIn session. Re-injecting every run creates a new session
         # event that causes LinkedIn to invalidate the user's browser session.
@@ -430,6 +498,11 @@ class LinkedInScanner:
         start_url = str(self.config.get("linkedin_start_url", "https://www.linkedin.com/jobs/"))
         search_query = str(self.config.get("search_query", "strategy OR insight OR insights OR Analyst"))
         location = str(self.config.get("linkedin_location", "Canada")).strip()
+        # Warm up on the homepage first so LinkedIn's bot scorer sees a natural
+        # navigation sequence before we hit the jobs search URL.
+        print("LinkedIn warm-up: loading homepage...")
+        self._safe_goto(page, "https://www.linkedin.com/feed/", timeout=30_000)
+        page.wait_for_timeout(3_000)
         print(f"Opening LinkedIn Jobs: {start_url}")
         self._safe_goto(page, start_url, timeout=30_000)
         self._wait_for_login_if_needed(page, headless=headless)
