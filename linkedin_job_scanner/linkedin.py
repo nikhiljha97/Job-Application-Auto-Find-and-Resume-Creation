@@ -213,9 +213,24 @@ class LinkedInScanner:
         ctx = playwright.chromium.launch_persistent_context(
             str(self.profile_dir),
             headless=headless,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                # Suppress the automation flag that LinkedIn detects
+                "--disable-blink-features=AutomationControlled",
+            ],
+            # Suppress navigator.webdriver so LinkedIn's bot detection doesn't block
+            ignore_default_args=["--enable-automation"],
             viewport={"width": 1440, "height": 1100},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
             slow_mo=60,
         )
+        # Override navigator.webdriver on every new page so LinkedIn can't detect headless
+        ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         # Only inject cookies.json if the persistent profile doesn't already have
         # a live LinkedIn session. Re-injecting every run creates a new session
         # event that causes LinkedIn to invalidate the user's browser session.
